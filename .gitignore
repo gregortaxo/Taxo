@@ -4,4 +4,12 @@ Mnesia.bilbo@gregor-VirtualBox/
 /barve.txt
 /bs.beam
 /ts.beam
-
+/jsx.beam
+/jsx_config.beam
+/jsx_consult.beam
+/jsx_decoder.beam
+/jsx_encoder.beam
+/jsx_parser.beam
+/jsx_to_json.beam
+/jsx_to_term.beam
+/jsx_verify.beam
