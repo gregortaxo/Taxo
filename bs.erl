@@ -1,7 +1,7 @@
 -module(bs).
--export([rpc/1,start/0,regUser/3,login/3,logout/3,searchTaxo/4,findTaxo/4,addTaxoBm/7,addTaxoTag/5,removeBookmark/4,getUserBookmarks/3,
+-export([rpc/1,start/0,regUser/3,login/3,logout/3,searchTaxo/4,findTaxo/4,addTaxoBm/8,addTaxoTag/5,removeBookmark/4,getUserBookmarks/3,
 		addContext/4, getContexts/3, removeContext/4, bmSearch/5, getTagsFromTaxoIndex/1,getIntersection/1,getBookmarkFile/4,addTaxoBmDataChunk/5,
-		getBookmarkTree/3,getTable/1, getBookmarkTree/1]).
+		getBookmarkTree/3,getTable/1, getBookmarkTree/1,getImagePreview/4]).
 -include_lib("stdlib/include/qlc.hrl").
 
 -record(users, {name, pass}).
@@ -29,8 +29,8 @@ searchTaxo(Name,Pass,Node,Word) ->
 findTaxo(Name,Pass,Node,Word) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{findTaxo, Word}}]).
 
-addTaxoBm(User,Pass,Node,Name,Url,FileName,FileData) ->  
-	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{addTaxoBm,toString(User), Name, Url,FileName,FileData}}]).
+addTaxoBm(User,Pass,Node,Name,Url,FileName,FileData,FilePreview) ->  
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{addTaxoBm,toString(User), Name, Url,FileName,FileData,FilePreview}}]).
 
 addTaxoBmDataChunk(User,Pass,Node,Name,FileData) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{addTaxoBmDataChunk,toString(User), Name,FileData}}]).
@@ -59,6 +59,9 @@ bmSearch(User,Pass,Node,Query,Children) ->
 getBookmarkFile(User,Pass,Node,Bookmark) -> 
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getBookmarkFile,toString(User),Bookmark}}]).
 
+getImagePreview(User,Pass,Node,Bookmark) -> 
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getImagePreview,toString(User),Bookmark}}]).
+
 getBookmarkTree(User,Pass,Node) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getBookmarkTree,User}}]).
 
@@ -75,8 +78,8 @@ rpc(Q) ->
 %%-------------------user process loop-------------
 loopProc() ->
     receive
-		{Id, {addTaxoBm, User, Name, Url,FileName,FileData}} ->
-			bms ! {forward, Id, addBookmark(User, Name, Url, FileName, FileData)},
+		{Id, {addTaxoBm, User, Name, Url,FileName,FileData,FilePreview}} ->
+			bms ! {forward, Id, addBookmark(User, Name, Url, FileName, FileData,FilePreview)},
 			loopProc();
 		{Id, {addTaxoBmDataChunk, User, Name,FileData}} ->
 			bms ! {forward, Id, addTaxoBmDataChunk(User, Name, FileData)},
@@ -119,6 +122,9 @@ loopProc() ->
 		{Id, {getBookmarkFile,User,Bookmark}} ->
 			bms ! {forward, Id, getBookmarkFile(User,Bookmark)},
 			loopProc();
+		{Id, {getImagePreview,User,Bookmark}} ->
+			bms ! {forward, Id, getImagePreview(User,Bookmark)},
+			loopProc();
 		{Id, {getBookmarkTree,User}} ->
 			bms ! {forward, Id, getBookmarkTree(User)},
 			loopProc();
@@ -129,12 +135,12 @@ loopProc() ->
 			loopProc()
     end.
 %%-----------------Taxo func--------------------------------------
-addBookmark(User,Name,Url,FileName,FileData) ->
+addBookmark(User,Name,Url,FileName,FileData,FilePreview) ->
 	User2 = nameToAtom(toString(User)),
 	User3 = nameToAtom(toString(User)++"files"),
 	case get_bookmarkDB(User2, Name) of
 		[] -> 
-			add_TaxoBookmarkDB(User2, Name, Url, []), saveFileToDisk(toString(User),Name,FileData),add_TaxoBookmarkDB(User3,Name,FileName,""), bookmark_added;
+			add_TaxoBookmarkDB(User2, Name, Url, []), saveFileToDisk(toString(User),Name,FileData), saveFilePreviewToDisk(toString(User),Name,FilePreview),add_TaxoBookmarkDB(User3,Name,FileName,""), bookmark_added;
 		_ ->
 			bookmark_already_exists
 	end.
@@ -142,6 +148,10 @@ addBookmark(User,Name,Url,FileName,FileData) ->
 saveFileToDisk(User,Name,FileData) ->
 	directoryCheck(User),
 	file:write_file("userFiles/" ++ User ++"/" ++ Name, [FileData], [append]).
+
+saveFilePreviewToDisk(User,Name,FileData) ->
+	directoryCheckPreviews(User),
+	file:write_file("userImagePreviews/" ++ User ++"/" ++ Name, [FileData], [append]).
 
 getBookmarkFile(User,Bookmark) ->
 	directoryCheck(toString(User)),
@@ -153,6 +163,9 @@ getBookmarkFile(User,Bookmark) ->
 deleteFileFromDisk(User,Bookmark) -> 
 	file:delete("userFiles/" ++ toString(User) ++ "/" ++ Bookmark).
 
+deleteFilePreviewFromDisk(User,Bookmark) -> 
+	file:delete("userImagePreviews/" ++ toString(User) ++ "/" ++ Bookmark).
+
 directoryCheck(User) ->
 	case file:make_dir("userFiles") of
 		ok ->
@@ -161,7 +174,7 @@ directoryCheck(User) ->
 			file:make_dir("userFiles/" ++ User), ok;
 		_ ->
 			ok
-	end. 
+	end.
 
 addTaxoBmDataChunk(User,Name,FileData) ->
 	User2 = nameToAtom(toString(User)++"files"),
@@ -173,6 +186,21 @@ addTaxoBmDataChunk(User,Name,FileData) ->
 			saveFileToDisk(User, Name,FileData)
 	end.
 
+getImagePreview(User,Bookmark) ->
+	directoryCheckPreviews(toString(User)),
+	{ok,FileText} = file:read_file("userImagePreviews/" ++ toString(User) ++ "/" ++ Bookmark),
+	FileText.
+
+directoryCheckPreviews(User) ->
+	case file:make_dir("userImagePreviews") of
+		ok ->
+			file:make_dir("userImagePreviews/" ++ User), ok;
+		{error,eexist} ->
+			file:make_dir("userImagePreviews/" ++ User), ok;
+		_ ->
+			ok
+	end. 
+
 removeBookmark(User, Name) -> 
 	User2 = nameToAtom(toString(User)),
 	User3 = nameToAtom(toString(User)++"files"),
@@ -181,7 +209,13 @@ removeBookmark(User, Name) ->
 		[] -> 
 			bookmark_removed;
 		_ ->
-			[H|_] = Bm, removeBmFromTaxoIndex(User2,H), remove_bookmarkDB(User2, Name),remove_bookmarkDB(User3, Name),deleteFileFromDisk(User,Name), bookmark_removed
+			[H|_] = Bm,
+			removeBmFromTaxoIndex(User2,H),
+			remove_bookmarkDB(User2, Name),
+			remove_bookmarkDB(User3, Name),
+			deleteFileFromDisk(User,Name),
+			deleteFilePreviewFromDisk(User,Name),	
+			bookmark_removed
 	end.
 
 removeBmFromTaxoIndex(User,{_,BmName,_,[{Id,_}|T]}) -> removeBmFromTaxoIndexHelper(User,Id,BmName), removeBmFromTaxoIndex(User, {"",BmName,"",T});

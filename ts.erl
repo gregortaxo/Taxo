@@ -106,14 +106,15 @@ handleRequestByType([H|T],BinaryDecoded) ->
 									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
 							end;
 						(Value == <<"addTaxoBm">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"name">>,<<"url">>,<<"filename">>,<<"filedata">>],BinaryDecoded),
+							Check = checkParams([<<"username">>,<<"password">>,<<"name">>,<<"url">>,<<"filename">>,<<"filedata">>,<<"filepreview">>],BinaryDecoded),
 							if
 								Check ->
 									Name2 = binary_to_list(getParameter(<<"name">>,BinaryDecoded)),
 									Url = binary_to_list(getParameter(<<"url">>,BinaryDecoded)),
 									FileName = binary_to_list(getParameter(<<"filename">>,BinaryDecoded)),
 									FileData = binary_to_list(getParameter(<<"filedata">>,BinaryDecoded)),
-									Res = bs:addTaxoBm(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),Name2,Url,FileName,FileData),
+									FilePreview = binary_to_list(getParameter(<<"filepreview">>,BinaryDecoded)),
+									Res = bs:addTaxoBm(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),Name2,Url,FileName,FileData,FilePreview),
 									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
 								true -> 
 									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
@@ -192,6 +193,16 @@ handleRequestByType([H|T],BinaryDecoded) ->
 							if
 								Check ->
 									Res = bs:getBookmarkFile(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
+									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
+									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
+								true -> 
+									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
+							end;
+						(Value == <<"getImagePreview">>) ->
+							Check = checkParams([<<"username">>,<<"password">>,<<"bookmark">>],BinaryDecoded),
+							if
+								Check ->
+									Res = bs:getImagePreview(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
 									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
 									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
 								true -> 
