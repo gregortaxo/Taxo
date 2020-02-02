@@ -47,7 +47,16 @@ handleRequest(Input) ->
 			BinaryDecoded = jsx:decode(list_to_binary(Input)),
 			handleRequestByType(BinaryDecoded,BinaryDecoded);
 		true -> 
-			[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequest">>}]
+			{ok,RequestBin} = file:read_file("tsRequests/" ++ Input),
+			file:delete("tsRequests/" ++ Input),
+			IsLegalJSON2 = jsx:is_json(RequestBin),
+			if 
+				IsLegalJSON2 ->
+					BinaryDecoded = jsx:decode(RequestBin),
+					handleRequestByType(BinaryDecoded,BinaryDecoded);
+				true -> 
+					[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequest">>}]
+			end
 	end.
 	
 handleRequestByType([H|T],BinaryDecoded) ->
