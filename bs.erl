@@ -536,8 +536,24 @@ getParents(Taxo) ->
 	
 %%---------------unified search-------------------------------------
 
-unifiedSearch(User,Query,"True") -> jsonConvert(processQuery(User,true,bracketCountCheck(Query,0,Query),[],[]));
-unifiedSearch(User,Query,"False") -> jsonConvert(processQuery(User,false,bracketCountCheck(Query,0,Query),[],[])).
+unifiedSearch(User,Query,"True") ->
+	Res = processQuery(User,true,bracketCountCheck(Query,0,Query),[],[]) ++ bmNamesearch(User,Query),
+	jsonConvert(removeDuplicates(Res));
+unifiedSearch(User,Query,"False") ->
+	Res = processQuery(User,false,bracketCountCheck(Query,0,Query),[],[]) ++ bmNamesearch(User,Query),
+	jsonConvert(removeDuplicates(Res)).
+
+bmNamesearch(User,Query) -> 
+	filterBmsByName(get_user_bookmarksDB4(nameToAtom(toString(User))),Query).
+
+filterBmsByName([H|T],Query) ->
+	case string:str(H, Query) > 0 of
+		false ->
+			filterBmsByName(T,Query);
+		true ->
+			[H] ++ filterBmsByName(T,Query)
+	end;
+filterBmsByName([],_) -> [].
 
 processQuery(User,Children,[[H|T]|T2],_,_)    -> processQuery(User,Children,T2,[],processQuery(User,Children,[H|T],[],[]));
 processQuery(User,Children,[38|T], Buffer,[]) -> processQuery(User,Children,getTextFromNextToken(T),[],removeDuplicates(getIntersection([getBmsForWord(User,Buffer,Children)] ++ [getTextToNextToken(T,[],User,Children)])));
