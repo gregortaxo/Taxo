@@ -27,7 +27,7 @@ searchTaxo(Name,Pass,Node,Word) ->
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{searchTaxo, Word}}]).
 
 findTaxo(Name,Pass,Node,Word) ->  
-	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{findTaxo, Word}}]).
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{findTaxo,toString(Name), Word}}]).
 
 addTaxoBm(User,Pass,Node,Name,Url,FileName,FileData,FilePreview) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{addTaxoBm,toString(User), Name, Url,FileName,FileData,FilePreview}}]).
@@ -100,8 +100,8 @@ loopProc() ->
        			bms ! {forward, Id, Msg}
    			end,
 			loopProc();
-		{Id, {findTaxo, Word}} ->
-			taxo ! {self(),findTaxo2,Word},
+		{Id, {findTaxo, User, Word}} ->
+			taxo ! {self(),findTaxo2,Word,User},
 			receive
      			{taxo, Msg} ->
        			bms ! {forward, Id, Msg}
@@ -1091,8 +1091,8 @@ loopTaxo() ->
 			{Pid, findTaxo, Word} ->
 				Pid ! {taxo, find(Word)},
 				loopTaxo();
-			{Pid, findTaxo2, Word} ->
-				Pid ! {taxo, find2(Word)},
+			{Pid, findTaxo2, Word,User} ->
+				Pid ! {taxo, find3(Word,User)},
 				loopTaxo();
 			{Pid, getChildren, Id} ->
 				Pid ! {taxo, getChildren(Id)},
@@ -1187,7 +1187,48 @@ find2(String) ->
         {ok,List} -> 
 			Res = for(List),
 			formatForJsonFor(getSortedRes(sortByPositionInHierarchy(Res, [])))
-   	end.	
+   	end.
+
+find3(String, User) ->
+	case dict:find(string:to_lower(String),get(searchIndex)) of
+        error  -> [];
+        {ok,List} -> 
+			Res = for(List),
+			SortedByNumberOfBmsAttached = sortByNumberOfBmsAttached(Res, nameToAtom(toString(User)++"index"),[]),
+			formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByNumberOfBmsAttached))
+	end.
+
+sortByPositionInHierarchyAndFormat([{_,H}|T]) -> 
+	getSortedRes(sortByPositionInHierarchy(H, [])) ++ sortByPositionInHierarchyAndFormat(T);
+sortByPositionInHierarchyAndFormat([]) -> [].
+
+sortByNumberOfBmsAttached([H|T],User,Res) ->
+	NumOfBms = getNumOfBmsAttached(get_TaxoIndexDB(User, lists:nth(1,H))),
+	sortByNumberOfBmsAttached(T,User,addToRes(NumOfBms,H,Res));
+sortByNumberOfBmsAttached([],_,Res) -> Res.
+
+addToRes(NumOfBms,Taxo,[{N,Taxos}|T]) -> 
+	if 
+		NumOfBms < N ->
+			[{N,Taxos}] ++ addToRes(NumOfBms,Taxo,T);
+		NumOfBms == N ->
+			[{N,Taxos ++ [Taxo]}] ++ T;
+		true -> 
+			[{NumOfBms,[Taxo]}] ++ [{N,Taxos}] ++ T
+	end;
+addToRes(NumOfBms,Taxo,[]) -> [{NumOfBms,[Taxo]}].
+
+getNumOfBmsAttached([{_,_,Bms}|_]) -> length(Bms);
+getNumOfBmsAttached(_) -> 0.
+
+% sortHelper([], Taxo) -> [Taxo];
+% sortHelper([{Len1,Taxo1}|T], {Len2,Taxo2}) -> 
+% 	if 
+% 		Len2 < Len1 ->
+% 			[{Len2,Taxo2},{Len1,Taxo1}|T];
+% 		true -> 
+% 			[{Len1,Taxo1}] ++ sortHelper(T,{Len2,Taxo2})
+% 	end.
 
 getChildren(Id)-> dict:fetch(Id,get(childrenIndex)).
 	
