@@ -409,7 +409,7 @@ convertForJsonHelper([H|T],User) -> [convertForJson(H,User)] ++ convertForJsonHe
 convertForJsonHelper([],_) -> [].
 
 getConcept(Id,User) -> 			
-	taxo ! {self(),searchTaxo,Id},
+	taxo ! {self(),searchTaxoOld,Id},
 	receive
 		{taxo, Msg} ->
 			Taxo = lists:nth(2,lists:nth(1, Msg)),
@@ -1083,10 +1083,13 @@ loopTaxo() ->
         _ -> 
 		receive
 			{Pid, searchTaxo, Word} ->
-				Pid ! {taxo, getBeseda(Word)},
+				Pid ! {taxo, getBesedaWithChildrenAndParents(Word)},
 				loopTaxo();
 			{Pid, searchTaxo2, Word} ->
 				Pid ! {taxo, getBeseda2(Word)},
+				loopTaxo();
+			{Pid, searchTaxoOld, Word} ->
+				Pid ! {taxo, getBeseda(Word)},
 				loopTaxo();
 			{Pid, findTaxo, Word} ->
 				Pid ! {taxo, find(Word)},
@@ -1155,6 +1158,20 @@ getBeseda(String) ->
 		Starsi = getEm(lists:nth(3,Beseda)),
 		[[<<"word">>,formatForJson(Beseda)],[<<"parents">>,formatForJsonFor(Starsi)],[<<"children">>,formatForJsonFor(Otroki)]]
    	end.
+
+getBesedaWithChildrenAndParents(String) ->
+	case dict:find(String,get(dataIndex)) of
+        error  -> [];
+        {ok,Beseda} -> 
+		Otroki = getOtroke(Beseda),
+		Starsi = getEm(lists:nth(3,Beseda)),
+		[[[<<"word">>,formatForJson(Beseda)],[<<"parents">>,formatForJsonFor(Starsi)],[<<"children">>,formatForJsonFor(Otroki)]]]
+		++ getBesedaMultiple(Starsi) ++ getBesedaMultiple(Otroki)
+   	end.
+
+getBesedaMultiple([[]|T]) -> getBesedaMultiple(T);
+getBesedaMultiple([H|T]) -> [getBeseda(lists:nth(1,H))] ++ getBesedaMultiple(T);
+getBesedaMultiple([]) -> [].
 	
 getBeseda2(String) ->
 	case dict:find(String,get(dataIndex)) of
