@@ -207,11 +207,11 @@ handleRequestByType([H|T],BinaryDecoded) ->
 								true -> 
 									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
 							end;
-						(Value == <<"getImagePreview">>) ->
+						(Value == <<"getFilePreview">>) ->
 							Check = checkParams([<<"username">>,<<"password">>,<<"bookmark">>],BinaryDecoded),
 							if
 								Check ->
-									Res = bs:getImagePreview(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
+									Res = bs:getFilePreview(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
 									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
 									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
 								true -> 
@@ -222,6 +222,16 @@ handleRequestByType([H|T],BinaryDecoded) ->
 							if
 								Check ->
 									Res = bs:getBookmarkTree(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node())),
+									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
+								true -> 
+									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
+							end;
+						(Value == <<"getSimilarBms">>) ->
+							Check = checkParams([<<"username">>,<<"password">>,<<"bookmark">>],BinaryDecoded),
+							if
+								Check ->
+									Res = bs:getSimilarBms(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
+									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
 									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
 								true -> 
 									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]

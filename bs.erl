@@ -1,7 +1,7 @@
 -module(bs).
 -export([rpc/1,start/0,regUser/3,login/3,logout/3,searchTaxo/4,findTaxo/4,addTaxoBm/8,addTaxoTag/5,removeBookmark/4,getUserBookmarks/3,
 		addContext/4, getContexts/3, removeContext/4, bmSearch/5, getTagsFromTaxoIndex/1,getIntersection/1,getBookmarkFile/4,addTaxoBmDataChunk/5,
-		getBookmarkTree/3,getTable/1, getBookmarkTree/1,getImagePreview/4]).
+		getBookmarkTree/3,getTable/1, getBookmarkTree/1,getFilePreview/4,getSimilarBms/4]).
 -include_lib("stdlib/include/qlc.hrl").
 
 -record(users, {name, pass}).
@@ -59,11 +59,14 @@ bmSearch(User,Pass,Node,Query,Children) ->
 getBookmarkFile(User,Pass,Node,Bookmark) -> 
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getBookmarkFile,toString(User),Bookmark}}]).
 
-getImagePreview(User,Pass,Node,Bookmark) -> 
-	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getImagePreview,toString(User),Bookmark}}]).
+getFilePreview(User,Pass,Node,Bookmark) -> 
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getFilePreview,toString(User),Bookmark}}]).
 
 getBookmarkTree(User,Pass,Node) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getBookmarkTree,User}}]).
+
+getSimilarBms(User,Pass,Node,Bookmark) -> 
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getSimilarBms,toString(User),Bookmark}}]).
 
 %%------------rpc------------------------
 rpc(Q) ->
@@ -122,12 +125,15 @@ loopProc() ->
 		{Id, {getBookmarkFile,User,Bookmark}} ->
 			bms ! {forward, Id, getBookmarkFile(User,Bookmark)},
 			loopProc();
-		{Id, {getImagePreview,User,Bookmark}} ->
-			bms ! {forward, Id, getImagePreview(User,Bookmark)},
+		{Id, {getFilePreview,User,Bookmark}} ->
+			bms ! {forward, Id, getFilePreview(User,Bookmark)},
 			loopProc();
 		{Id, {getBookmarkTree,User}} ->
 			bms ! {forward, Id, getBookmarkTree(User)},
 			loopProc();
+		{Id, {getSimilarBms,User,Bookmark}} ->
+			bms ! {forward, Id, getSimilarBms(User,Bookmark)},
+			loopProc(); 
 		{end_proc} ->
 			exit(normal);
 		M -> 
@@ -186,7 +192,7 @@ addTaxoBmDataChunk(User,Name,FileData) ->
 			saveFileToDisk(User, Name,FileData)
 	end.
 
-getImagePreview(User,Bookmark) ->
+getFilePreview(User,Bookmark) ->
 	directoryCheckPreviews(toString(User)),
 	{ok,FileText} = file:read_file("userImagePreviews/" ++ toString(User) ++ "/" ++ Bookmark),
 	FileText.
@@ -390,6 +396,8 @@ search_taxoBmsSHelper3d(Bm,[H|T]) ->
 					search_taxoBmsSHelper3d(Bm,T)
 	end;
 search_taxoBmsSHelper3d(_,[]) -> true.
+
+getSimilarBms(User,Bookmark) -> [].%%[toBinaryString("text"), toBinaryString("car2")].
 
 %%---------------tree visualization-------------------------------------
 
@@ -1196,14 +1204,6 @@ find(String) ->
 	case dict:find(string:to_lower(String),get(searchIndex)) of
         error  -> [];
         {ok,List} -> for(List)
-   	end.	
-	
-find2(String) ->
-	case dict:find(string:to_lower(String),get(searchIndex)) of
-        error  -> [];
-        {ok,List} -> 
-			Res = for(List),
-			formatForJsonFor(getSortedRes(sortByPositionInHierarchy(Res, [])))
    	end.
 
 find3(String, User) ->
@@ -1256,7 +1256,7 @@ formatForJsonFor([H|T]) -> [formatForJson(H)] ++ formatForJsonFor(T);
 formatForJsonFor([])-> [].
 
 sortByPositionInHierarchy([H|T], Res)-> 
-	[H1|T1] = H,
+	[H1|_] = H,
 	Len = length(getParentsForTaxo(H1)),
 	sortByPositionInHierarchy(T, sortHelper(Res,{Len,H}));
 sortByPositionInHierarchy([],Res) -> Res.
