@@ -353,6 +353,7 @@ getChildrenFromIndex(Id) ->
     	{taxo, Res} -> Res
    	end.
 
+getIdsFromMsg([[]|T2]) -> getIdsFromMsg(T2);
 getIdsFromMsg([[Id|_]|T2]) -> [Id] ++ getIdsFromMsg(T2);
 getIdsFromMsg([]) -> [].
 
@@ -397,7 +398,33 @@ search_taxoBmsSHelper3d(Bm,[H|T]) ->
 	end;
 search_taxoBmsSHelper3d(_,[]) -> true.
 
-getSimilarBms(User,Bookmark) -> [].%%[toBinaryString("text"), toBinaryString("car2")].
+getSimilarBms(User,Bookmark) -> %%[toBinaryString("text"), toBinaryString("car2")].
+	User2 = nameToAtom(toString(User)),
+	UserIndex = nameToAtom(toString(User)++"index"),
+	[{_,_,_,T}] = get_bookmarkDB(User2, Bookmark),
+	Res = removeDuplicates(getSimilarBmsForConcepts(getTaxoIds(T),UserIndex,0)),
+	jsonConvert(removeThisBm(Res,Bookmark)).
+
+removeThisBm([Bm|T],Bm) -> T;
+removeThisBm([OtherBm|T],Bm) -> [OtherBm] ++ removeThisBm(T,Bm);
+removeThisBm([],_) -> [].
+
+
+getTaxoIds([{Taxo,_}|T]) -> [Taxo] ++ getTaxoIds(T);
+getTaxoIds([]) -> [].
+
+getSimilarBmsForConcepts(_,_,3) -> [];
+getSimilarBmsForConcepts([Taxo|T],UserIndex,Limit) -> getSimilarBmsForConcept(UserIndex,Taxo,Limit) ++ getSimilarBmsForConcepts(T,UserIndex,Limit);
+getSimilarBmsForConcepts([],_,_) -> [].
+
+getSimilarBmsForConcept(Index,TaxoId,Limit) -> 
+	List = get_TaxoIndexDB(Index, TaxoId),
+	Res = getBookmarksFromTaxoTag(List),
+	taxo ! {self(),searchTaxo2,TaxoId},
+	receive
+    	{taxo, {_,{starsi,Starsi},{otroki,Otroki}}} ->
+			Res ++ getSimilarBmsForConcepts(getIdsFromMsg(Starsi ++ Otroki),Index,Limit + 1)
+   	end.
 
 %%---------------tree visualization-------------------------------------
 
