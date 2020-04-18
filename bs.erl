@@ -1,5 +1,5 @@
 -module(bs).
--export([rpc/1,start/0,regUser/3,login/3,logout/3,searchTaxo/4,findTaxo/4,addTaxoBm/8,addTaxoTag/5,removeBookmark/4,getUserBookmarks/3,
+-export([rpc/1,start/0,regUser/3,login/3,logout/3,searchTaxo/4,findTaxo/5,addTaxoBm/8,addTaxoTag/5,removeBookmark/4,getUserBookmarks/3,
 		addContext/4, getContexts/3, removeContext/4, bmSearch/5, getTagsFromTaxoIndex/1,getIntersection/1,getBookmarkFile/4,addTaxoBmDataChunk/5,
 		getBookmarkTree/3,getTable/1, getBookmarkTree/1,getFilePreview/4,getSimilarBms/4]).
 -include_lib("stdlib/include/qlc.hrl").
@@ -26,8 +26,8 @@ logout(Name,Pass,Node) ->
 searchTaxo(Name,Pass,Node,Word) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{searchTaxo, Word}}]).
 
-findTaxo(Name,Pass,Node,Word) ->  
-	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{findTaxo,toString(Name), Word}}]).
+findTaxo(Name,Pass,Node,Word,ContextConcepts) ->  
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(Name),toString(Pass),{findTaxo,toString(Name), Word, ContextConcepts}}]).
 
 addTaxoBm(User,Pass,Node,Name,Url,FileName,FileData,FilePreview) ->  
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{addTaxoBm,toString(User), Name, Url,FileName,FileData,FilePreview}}]).
@@ -103,8 +103,8 @@ loopProc() ->
        			bms ! {forward, Id, Msg}
    			end,
 			loopProc();
-		{Id, {findTaxo, User, Word}} ->
-			taxo ! {self(),findTaxo2,Word,User},
+		{Id, {findTaxo, User, Word, ContextConcepts}} ->
+			taxo ! {self(),findTaxo2,Word,User, ContextConcepts},
 			receive
      			{taxo, Msg} ->
        			bms ! {forward, Id, Msg}
@@ -512,10 +512,10 @@ getParentCounts([], Res) -> getCounts(Res, []).
 
 getCounts([H|T], Res) -> 
 	case lists:member(H,T) of
-				false ->
-					getCounts(T, Res);
-				true ->
-					getCounts(T,Res ++ [H])
+		false ->
+			getCounts(T, Res);
+		true ->
+			getCounts(T,Res ++ [H])
 	end;
 getCounts([],Res) -> Res.
 
@@ -1129,8 +1129,8 @@ loopTaxo() ->
 			{Pid, findTaxo, Word} ->
 				Pid ! {taxo, find(Word)},
 				loopTaxo();
-			{Pid, findTaxo2, Word,User} ->
-				Pid ! {taxo, find3(Word,User)},
+			{Pid, findTaxo2, Word, User, ContextConcepts} ->
+				Pid ! {taxo, find3(Word, User, ContextConcepts)},
 				loopTaxo();
 			{Pid, getChildren, Id} ->
 				Pid ! {taxo, getChildren(Id)},
@@ -1233,13 +1233,14 @@ find(String) ->
         {ok,List} -> for(List)
    	end.
 
-find3(String, User) ->
+find3(String, User, ContextConcepts) ->
 	case dict:find(string:to_lower(String),get(searchIndex)) of
         error  -> [];
         {ok,List} -> 
 			Res = for(List),
 			SortedByNumberOfBmsAttached = sortByNumberOfBmsAttached(Res, nameToAtom(toString(User)++"index"),[]),
-			formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByNumberOfBmsAttached))
+			SortedByConceptsInContext = sortByConceptsInContext(SortedByNumberOfBmsAttached,string:tokens(ContextConcepts, ",")),
+			formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByConceptsInContext))
 	end.
 
 sortByPositionInHierarchyAndFormat([{_,H}|T]) -> 
@@ -1264,15 +1265,6 @@ addToRes(NumOfBms,Taxo,[]) -> [{NumOfBms,[Taxo]}].
 
 getNumOfBmsAttached([{_,_,Bms}|_]) -> length(Bms);
 getNumOfBmsAttached(_) -> 0.
-
-% sortHelper([], Taxo) -> [Taxo];
-% sortHelper([{Len1,Taxo1}|T], {Len2,Taxo2}) -> 
-% 	if 
-% 		Len2 < Len1 ->
-% 			[{Len2,Taxo2},{Len1,Taxo1}|T];
-% 		true -> 
-% 			[{Len1,Taxo1}] ++ sortHelper(T,{Len2,Taxo2})
-% 	end.
 
 getChildren(Id)-> dict:fetch(Id,get(childrenIndex)).
 	
@@ -1314,3 +1306,45 @@ getParentsForTaxo(Taxo) ->
 
 getSortedRes([{_,H}|T]) -> [H] ++ getSortedRes(T);
 getSortedRes([]) -> [].
+
+sortByConceptsInContext(Res, []) -> Res;
+sortByConceptsInContext([{N,H}|T], ContextConcepts) ->  makeNewGroupsSortedByContext(H,ContextConcepts) ++ sortByConceptsInContext(T, ContextConcepts);
+sortByConceptsInContext([],_) -> [].
+
+%%[{N,sortByDistanceToConcepts(H,ContextConcepts)}]
+makeNewGroupsSortedByContext(H,ContextConcepts) -> 	makeNewGroupsSortedByContextHelper(sortByDistanceToConcepts(H,ContextConcepts),[]).
+
+makeNewGroupsSortedByContextHelper([],Res) -> Res;
+makeNewGroupsSortedByContextHelper([H|T],Res) -> makeNewGroupsSortedByContextHelper(T,addToRes2(H,Res)).
+
+
+addToRes2({X,H},[{N,Taxos}|T]) -> 
+	if 
+		X < N ->
+			[{N,Taxos}] ++ addToRes2({X,H},T);
+		X == N ->
+			[{N,Taxos ++ [H]}] ++ T;
+		true -> 
+			[{X,[H]}] ++ [{N,Taxos}] ++ T
+	end;
+addToRes2({X,H},[]) -> [{X,[H]}].
+
+sortByDistanceToConcepts([H|T], ContextConcepts) -> sortByDistanceToConcept(H, ContextConcepts,0) ++ sortByDistanceToConcepts(T,ContextConcepts);
+sortByDistanceToConcepts([], ContextConcepts) -> [].
+
+sortByDistanceToConcept(Con, [H|T], Res) -> sortByDistanceToConcept(Con, T, Res + getDistanceToConcept(Con,[H],3));
+sortByDistanceToConcept(Con,[],Res) -> [{Res,Con}].
+
+getDistanceToConcept(_,_,0) -> 0;
+getDistanceToConcept(Con,List,Limit) -> 
+	case lists:member(lists:nth(1,Con),List) of
+		false ->
+			getDistanceToConceptHelperFor(Con,List,Limit,[]);
+		true ->
+			Limit
+	end.
+
+getDistanceToConceptHelperFor(Con,[H|T],Limit,Res) -> 
+	{_,{starsi,Starsi},{otroki,Otroki}} = getBeseda2(H),
+	getDistanceToConceptHelperFor(Con,T,Limit,Res ++ getIdsFromMsg(Starsi ++ Otroki));
+getDistanceToConceptHelperFor(Con,[],Limit,Res) -> getDistanceToConcept(Con,Res,Limit-1).

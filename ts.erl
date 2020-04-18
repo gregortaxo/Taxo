@@ -59,196 +59,79 @@ handleRequest(Input) ->
 			end
 	end.
 	
-handleRequestByType([H|T],BinaryDecoded) ->
+handleRequestByType([H|T],D) ->
 	IsTuple = is_tuple(H),
 	if
 		IsTuple ->
-			{Name,Value} = H,
+			{Name,F} = H,
 			if
 				(Name == <<"fun">>) ->
-					io:fwrite(binary_to_list(Value) ++ "~n"),
+					io:fwrite(binary_to_list(F) ++ "~n"),
 					%%io:format("handleRequestByType: ~w~n~w~n", [erlang:process_info(self(),memory), erlang:process_info(self())]),
+					Check = checkParams([<<"username">>,<<"password">>] ++ getRequestTypeParams(F),D),
 					if
-						(Value == <<"login">>) ->
-							Check = checkParams([<<"username">>,<<"password">>],BinaryDecoded),
+						Check ->
+							U = getVal(<<"username">>,D),
+							P = getVal(<<"password">>,D),
+							N = atom_to_list(node()),
 							if
-								Check ->
-									Res = atom_to_list(bs:login(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()))),
-									[{<<"error">>,<<"false">>},{<<"result">>,list_to_binary(Res)}];
+								(F == <<"login">>) -> ret(list_to_binary(atom_to_list(bs:login(U,P,N))));
+								(F == <<"regUser">>) -> ret(list_to_binary(atom_to_list(bs:regUser(U,P,N))));
+								(F == <<"getUserBookmarks">>) -> ret(bs:getUserBookmarks(U,P,N));
+								(F == <<"searchTaxo">>) -> ret(bs:searchTaxo(U,P,N,getVal(<<"word">>,D)));
+								(F == <<"findTaxo">>) -> ret(bs:findTaxo(U,P,N,getVal(<<"word">>,D),getVal(<<"contextConcepts">>,D)));
+								(F == <<"addTaxoBm">>) -> ret(bs:addTaxoBm(U,P,N,getVal(<<"name">>,D),getVal(<<"url">>,D),getVal(<<"filename">>,D),getVal(<<"filedata">>,D),getVal(<<"filepreview">>,D)));
+								(F == <<"addTaxoBmDataChunk">>) -> ret(bs:addTaxoBmDataChunk(U,P,N,getVal(<<"name">>,D),getVal(<<"filedata">>,D)));
+								(F == <<"addTaxoTag">>) -> ret(bs:addTaxoTag(U,P,N,getVal(<<"name">>,D),[{getVal(<<"taxoId">>,D),getVal(<<"taxoName">>,D)}]));
+								(F == <<"removeBookmark">>) -> ret(bs:removeBookmark(U,P,N,getVal(<<"name">>,D)));
+								(F == <<"addContext">>) -> ret(bs:addContext(U,P,N,{getVal(<<"contextName">>,D),getVal(<<"taxoTags">>,D),getVal(<<"queries">>,D)}));
+								(F == <<"getContexts">>) -> ret(bs:getContexts(U,P,N));
+								(F == <<"removeContext">>) -> ret(bs:removeContext(U,P,N,getVal(<<"contextName">>,D)));
+								(F == <<"newSearch">>) -> ret(bs:bmSearch(U,P,N,getVal(<<"query">>,D),getVal(<<"children">>,D)));
+								(F == <<"getBookmarkFile">>) -> ret(bs:getBookmarkFile(U,P,N,getVal(<<"bookmark">>,D)));
+								(F == <<"getFilePreview">>) -> ret(bs:getFilePreview(U,P,N,getVal(<<"bookmark">>,D)));
+								(F == <<"getBookmarkTree">>) ->	ret(bs:getBookmarkTree(U,P,N));
+								(F == <<"getSimilarBms">>) -> ret(bs:getSimilarBms(U,P,N,getVal(<<"bookmark">>,D)));
 								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"regUser">>) ->
-							Check = checkParams([<<"username">>,<<"password">>],BinaryDecoded),
-							if
-								Check ->
-									Res = atom_to_list(bs:regUser(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()))),
-									[{<<"error">>,<<"false">>},{<<"result">>,list_to_binary(Res)}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"getUserBookmarks">>) ->
-							Check = checkParams([<<"username">>,<<"password">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:getUserBookmarks(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node())),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"searchTaxo">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"word">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:searchTaxo(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),binary_to_list(getParameter(<<"word">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"findTaxo">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"word">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:findTaxo(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),binary_to_list(getParameter(<<"word">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"addTaxoBm">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"name">>,<<"url">>,<<"filename">>,<<"filedata">>,<<"filepreview">>],BinaryDecoded),
-							if
-								Check ->
-									Name2 = binary_to_list(getParameter(<<"name">>,BinaryDecoded)),
-									Url = binary_to_list(getParameter(<<"url">>,BinaryDecoded)),
-									FileName = binary_to_list(getParameter(<<"filename">>,BinaryDecoded)),
-									FileData = binary_to_list(getParameter(<<"filedata">>,BinaryDecoded)),
-									FilePreview = binary_to_list(getParameter(<<"filepreview">>,BinaryDecoded)),
-									Res = bs:addTaxoBm(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),Name2,Url,FileName,FileData,FilePreview),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"addTaxoBmDataChunk">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"name">>,<<"filedata">>],BinaryDecoded),
-							if
-								Check ->
-									Name2 = binary_to_list(getParameter(<<"name">>,BinaryDecoded)),
-									FileData = binary_to_list(getParameter(<<"filedata">>,BinaryDecoded)),
-									Res = bs:addTaxoBmDataChunk(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),Name2,FileData),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"addTaxoTag">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"name">>,<<"taxoId">>,<<"taxoName">>],BinaryDecoded),
-							if
-								Check ->
-									Name2 = binary_to_list(getParameter(<<"name">>,BinaryDecoded)),
-									TmpTuple = [{binary_to_list(getParameter(<<"taxoId">>,BinaryDecoded)),binary_to_list(getParameter(<<"taxoName">>,BinaryDecoded))}],
-									Res = bs:addTaxoTag(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),Name2,TmpTuple),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"removeBookmark">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"name">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:removeBookmark(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),binary_to_list(getParameter(<<"name">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"addContext">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"contextName">>,<<"taxoTags">>,<<"queries">>],BinaryDecoded),
-							if
-								Check ->
-									TmpTuple = {binary_to_list(getParameter(<<"contextName">>,BinaryDecoded)),binary_to_list(getParameter(<<"taxoTags">>,BinaryDecoded)),binary_to_list(getParameter(<<"queries">>,BinaryDecoded))},
-									Res = bs:addContext(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),TmpTuple),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"getContexts">>) ->
-							Check = checkParams([<<"username">>,<<"password">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:getContexts(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node())),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"removeContext">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"contextName">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:removeContext(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),binary_to_list(getParameter(<<"contextName">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"newSearch">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"query">>,<<"children">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:bmSearch(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
-									binary_to_list(getParameter(<<"query">>,BinaryDecoded)),binary_to_list(getParameter(<<"children">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"getBookmarkFile">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"bookmark">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:getBookmarkFile(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
-									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"getFilePreview">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"bookmark">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:getFilePreview(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
-									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"getBookmarkTree">>) ->
-							Check = checkParams([<<"username">>,<<"password">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:getBookmarkTree(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node())),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
-							end;
-						(Value == <<"getSimilarBms">>) ->
-							Check = checkParams([<<"username">>,<<"password">>,<<"bookmark">>],BinaryDecoded),
-							if
-								Check ->
-									Res = bs:getSimilarBms(binary_to_list(getParameter(<<"username">>,BinaryDecoded)),binary_to_list(getParameter(<<"password">>,BinaryDecoded)),atom_to_list(node()),
-									binary_to_list(getParameter(<<"bookmark">>,BinaryDecoded))),
-									[{<<"error">>,<<"false">>},{<<"result">>,Res}];
-								true -> 
-									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
+									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestType">>}]
 							end;
 						true -> 
-							[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestType">>}]
+							[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestParams">>}]
 					end;
 				true -> 
-					handleRequestByType(T,BinaryDecoded)
+					handleRequestByType(T,D)
 			end;
 		true -> 
 			[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequest">>}]
     end;
 handleRequestByType([],_) -> [{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequest">>}].
 
+ret(Res) -> [{<<"error">>,<<"false">>},{<<"result">>,Res}].
+
+getRequestTypeParams(F) ->
+	if
+		(F == <<"login">>) -> [];
+		(F == <<"regUser">>) -> [];
+		(F == <<"getUserBookmarks">>) -> [];
+		(F == <<"searchTaxo">>) -> [<<"word">>];
+		(F == <<"findTaxo">>) ->   [<<"word">>,<<"contextConcepts">>];
+		(F == <<"addTaxoBm">>) ->  [<<"name">>,<<"url">>,<<"filename">>,<<"filedata">>,<<"filepreview">>];
+		(F == <<"addTaxoBmDataChunk">>) -> [<<"name">>,<<"filedata">>];
+		(F == <<"addTaxoTag">>) -> [<<"name">>,<<"taxoId">>,<<"taxoName">>];
+		(F == <<"removeBookmark">>) -> [<<"name">>];
+		(F == <<"addContext">>) -> [<<"contextName">>,<<"taxoTags">>,<<"queries">>];
+		(F == <<"getContexts">>) -> [];
+		(F == <<"removeContext">>) -> [<<"contextName">>];
+		(F == <<"newSearch">>) -> [<<"query">>,<<"children">>];
+		(F == <<"getBookmarkFile">>) -> [<<"bookmark">>];
+		(F == <<"getFilePreview">>) -> [<<"bookmark">>];
+		(F == <<"getBookmarkTree">>) -> [];
+		(F == <<"getSimilarBms">>) -> [<<"bookmark">>];
+		true -> []
+	end.
+
 checkParams([H|T],Data) -> 
-	ParamExists = getParameter(H,Data),
+	ParamExists = getVal(H,Data),
 	if
 		ParamExists == false ->
 			false;
@@ -257,18 +140,18 @@ checkParams([H|T],Data) ->
     end;
 checkParams([],_) -> true.
 
-getParameter(Param, [H|T]) ->
+getVal(Param, [H|T]) ->
 	IsTuple = is_tuple(H),
 	if
 		IsTuple ->
 			{Name,Value} = H,
 			if
 				(Name == Param) ->
-					Value;
+					binary_to_list(Value);
 				true -> 
-					getParameter(Param,T)
+					getVal(Param,T)
 			end;
 		true -> 
-			getParameter(Param,T)
+			getVal(Param,T)
     end;
-getParameter(_, []) ->	false.
+getVal(_, []) ->	false.

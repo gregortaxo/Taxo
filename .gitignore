@@ -14,3 +14,4 @@ Mnesia.bilbo@gregor-VirtualBox/
 /jsx_to_json.beam
 /jsx_to_term.beam
 /jsx_verify.beam
+/tst
