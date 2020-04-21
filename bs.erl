@@ -1234,14 +1234,32 @@ find(String) ->
    	end.
 
 find3(String, User, ContextConcepts) ->
-	case dict:find(string:to_lower(String),get(searchIndex)) of
-        error  -> [];
-        {ok,List} -> 
-			Res = for(List),
-			SortedByNumberOfBmsAttached = sortByNumberOfBmsAttached(Res, nameToAtom(toString(User)++"index"),[]),
-			SortedByConceptsInContext = sortByConceptsInContext(SortedByNumberOfBmsAttached,string:tokens(ContextConcepts, ",")),
-			formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByConceptsInContext))
-	end.
+	Res = processConceptSearchQuery(String),
+	SortedByNumberOfBmsAttached = sortByNumberOfBmsAttached(Res, nameToAtom(toString(User)++"index"),[]),
+	SortedByConceptsInContext = sortByConceptsInContext(SortedByNumberOfBmsAttached,string:tokens(ContextConcepts, ",")),
+	formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByConceptsInContext)).
+
+processConceptSearchQuery(String) ->
+	Res = processQuery2(String,[]),
+	processQuery3(Res,[]).
+
+processQuery3([H|[38|[H2|T]]], []) -> processQuery3(T, removeDuplicates(getIntersection([H] ++ [H2])));
+processQuery3([H|[124|[H2|T]]], []) -> processQuery3(T, removeDuplicates(H ++ H2));
+processQuery3([38|[H|T]], Res) -> processQuery3(T, removeDuplicates(getIntersection([Res]++[H])));
+processQuery3([124|[H|T]], Res) -> processQuery3(T, removeDuplicates(Res ++ H));
+processQuery3([38|T], Res) -> processQuery3(T, Res);
+processQuery3([124|T], Res) -> processQuery3(T, Res);
+processQuery3([H|T], Res) -> processQuery3(T, removeDuplicates(Res ++ H));
+processQuery3([], Res) -> removeDuplicates(Res);
+processQuery3(_, Res) -> removeDuplicates(Res).
+
+processQuery2([38|T], Buffer) -> [find(removeEmptyChars3(Buffer))] ++ [38] ++ processQuery2(T,[]);
+processQuery2([124|T],Buffer) -> [find(removeEmptyChars3(Buffer))] ++ [124] ++ processQuery2(T,[]);
+processQuery2([Text|T],Buffer) ->  processQuery2(T,Buffer ++ [Text]);
+processQuery2([],[]) -> [];
+processQuery2([],Buffer) -> [find(removeEmptyChars3(Buffer))].
+
+removeEmptyChars3(Str) -> joinListWithEmptySpaces(string:tokens(Str, " ")).
 
 sortByPositionInHierarchyAndFormat([{_,H}|T]) -> 
 	getSortedRes(sortByPositionInHierarchy(H, [])) ++ sortByPositionInHierarchyAndFormat(T);
