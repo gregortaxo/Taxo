@@ -97,18 +97,10 @@ loopProc() ->
 			bms ! {forward, Id, getUserBookmarks(User)},
 			loopProc();
 		{Id, {searchTaxo, Word}} ->
-			taxo ! {self(),searchTaxo,Word},
-			receive
-     			{taxo, Msg} ->
-       			bms ! {forward, Id, Msg}
-   			end,
+			bms ! {forward, Id, getConceptWithChildrenAndParents(Word)},
 			loopProc();
 		{Id, {findTaxo, User, Word, ContextConcepts}} ->
-			taxo ! {self(),findTaxo2,Word,User, ContextConcepts},
-			receive
-     			{taxo, Msg} ->
-       			bms ! {forward, Id, Msg}
-   			end,
+			bms ! {forward, Id, conceptSearchAndSortForUser(User, Word, ContextConcepts)},
 			loopProc();
 		{Id, {addContext, User, Context}} ->
 			bms ! {forward, Id, addContext(User, Context)},
@@ -120,7 +112,7 @@ loopProc() ->
 			bms ! {forward, Id, removeContext(User, Context)},
 			loopProc();
 		{Id, {bmSearch,User,Words,Children}} ->
-			bms ! {forward, Id, unifiedSearch(User,Words,Children)},
+			bms ! {forward, Id, bookmarkSearch(User,Words,Children)},
 			loopProc();
 		{Id, {getBookmarkFile,User,Bookmark}} ->
 			bms ! {forward, Id, getBookmarkFile(User,Bookmark)},
@@ -314,20 +306,20 @@ jsonConvert([]) -> [].
 
 searchTaxoBmsWithoutChildren(_,[]) -> [];
 searchTaxoBmsWithoutChildren(User,Word) ->
-	taxo ! {self(),findTaxo,lists:nth(1,Word)},
-	receive
-    	{taxo, Msg} ->
-			Ids = getIdsFromMsg(Msg),
-			removeDuplicates(getResultsFromTaxoIndexHelper(nameToAtom(toString(User)++"index"),Ids))
-   	end.
+	Concepts = findConceptsForString(lists:nth(1,Word)),
+	Ids = getIdsFromMsg(Concepts),
+	removeDuplicates(getResultsFromTaxoIndexHelper(nameToAtom(toString(User)++"index"),Ids)).
 
 searchTaxoBmsWithChildren(_,[]) -> [];
 searchTaxoBmsWithChildren(User,Word) ->
-	taxo ! {self(),findTaxo,lists:nth(1,Word)},
-	receive
-    	{taxo, Msg} ->
-			Ids = getIdsFromMsg(Msg) ++ getOtroke2(Msg),
-			removeDuplicates(getResultsFromTaxoIndexHelper(nameToAtom(toString(User)++"index"),Ids))	
+	Concepts = findConceptsForString(lists:nth(1,Word)),
+	Ids = getIdsFromMsg(Concepts) ++ getOtroke2(Concepts),
+	removeDuplicates(getResultsFromTaxoIndexHelper(nameToAtom(toString(User)++"index"),Ids)).
+
+findConceptsForString(String) ->
+	case ets:lookup(searchindex, string:to_lower(String)) of
+        [{_,List}] -> getConceptsByIds(List);
+		_ -> []
    	end.
 
 getTaxoBmsWithoutChildrenForTaxoId(_,[]) -> [];
@@ -347,10 +339,10 @@ getOtroke2([[Id|_]|T]) ->  getChildrenFromIndex(Id) ++ getOtroke2For(getChildren
 getOtroke2For([Taxo|Tail]) -> getChildrenFromIndex(Taxo) ++ getOtroke2For(getChildrenFromIndex(Taxo)) ++ getOtroke2For(Tail);
 getOtroke2For([]) -> [].
 
-getChildrenFromIndex(Id) -> 
-	taxo ! {self(),getChildren,Id},
-	receive
-    	{taxo, Res} -> Res
+getChildrenFromIndex(Id)-> 
+	case ets:lookup(childrenindex, Id) of
+        [{_,Res}] -> Res;
+		_ -> []
    	end.
 
 getIdsFromMsg([[]|T2]) -> getIdsFromMsg(T2);
@@ -398,7 +390,7 @@ search_taxoBmsSHelper3d(Bm,[H|T]) ->
 	end;
 search_taxoBmsSHelper3d(_,[]) -> true.
 
-getSimilarBms(User,Bookmark) -> %%[toBinaryString("text"), toBinaryString("car2")].
+getSimilarBms(User,Bookmark) ->
 	User2 = nameToAtom(toString(User)),
 	UserIndex = nameToAtom(toString(User)++"index"),
 	[{_,_,_,T}] = get_bookmarkDB(User2, Bookmark),
@@ -420,10 +412,56 @@ getSimilarBmsForConcepts([],_,_) -> [].
 getSimilarBmsForConcept(Index,TaxoId,Limit) -> 
 	List = get_TaxoIndexDB(Index, TaxoId),
 	Res = getBookmarksFromTaxoTag(List),
-	taxo ! {self(),searchTaxo2,TaxoId},
-	receive
-    	{taxo, {_,{starsi,Starsi},{otroki,Otroki}}} ->
-			Res ++ getSimilarBmsForConcepts(getIdsFromMsg(Starsi ++ Otroki),Index,Limit + 1)
+	{_,{starsi,Starsi},{otroki,Otroki}} = getConcept(TaxoId),
+	Res ++ getSimilarBmsForConcepts(getIdsFromMsg(Starsi ++ Otroki),Index,Limit + 1).
+
+getConceptJsonFormated(String) ->
+	case ets:lookup(dataindex, String) of
+        [{_,Concept}] -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]];
+		_ -> []
+   	end.
+
+getConceptWithChildrenAndParents(String) ->
+	case ets:lookup(dataindex, String) of
+        [{_,Concept}] -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			[[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]]]
+			++ getBesedaMultiple(Parents) ++ getBesedaMultiple(Children);
+		_ -> []
+   	end.
+
+getBesedaMultiple([[]|T]) -> getBesedaMultiple(T);
+getBesedaMultiple([H|T]) -> [getConceptJsonFormated(lists:nth(1,H))] ++ getBesedaMultiple(T);
+getBesedaMultiple([]) -> [].
+	
+getChildren([_,_,_,_]) -> [];
+getChildren([_,_,_,_,Otroci]) -> getConceptsByIdsString(Otroci).
+
+getConceptsByIdsString(Ids) ->
+	List = (string:tokens(Ids, ",")),
+	getConceptsByIds(List).
+	
+getConceptsByIds([X|Y]) -> [getConceptById(X)] ++ getConceptsByIds(Y);
+getConceptsByIds([]) -> [].
+
+getConceptById(String) when String =/= "null" -> 
+	case ets:lookup(dataindex, String) of
+        [{_,Concept}] -> Concept;
+		_ -> []
+   	end;
+getConceptById(_) -> [].
+
+getConcept(Id) ->
+	case ets:lookup(dataindex, Id) of
+        [{_,Concept}] -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			{Concept,{starsi,Parents},{otroki,Children}};
+		_ -> []
    	end.
 
 %%---------------tree visualization-------------------------------------
@@ -437,25 +475,22 @@ getBookmarkTree(User) ->
 	TrimmedList = convertForJson(getTrimmedList(TrimmedTree), User2),
 	TrimmedList.
 
-convertForJson([H|T], User) ->  [getConcept(H,User)] ++ convertForJsonHelper(T,User);
+convertForJson([H|T], User) ->  [getConceptData(H,User)] ++ convertForJsonHelper(T,User);
 convertForJson([],_) ->  [].
 
 convertForJsonHelper([H|T],User) -> [convertForJson(H,User)] ++ convertForJsonHelper(T,User);
 convertForJsonHelper([],_) -> [].
 
-getConcept(Id,User) -> 			
-	taxo ! {self(),searchTaxoOld,Id},
-	receive
-		{taxo, Msg} ->
-			Taxo = lists:nth(2,lists:nth(1, Msg)),
-			TaxoIndexRes = get_TaxoIndexDB(User, Id),
-			if
-				TaxoIndexRes == [] ->
-					[lists:nth(1, Taxo), lists:nth(2, Taxo),[]];
-				true ->
-					{_,_,Res} = lists:nth(1,TaxoIndexRes),
-					[lists:nth(1, Taxo), lists:nth(2, Taxo), formatForJson(Res)]
-			end
+getConceptData(Id,User) ->
+	Concept = getConceptJsonFormated(Id),
+	Taxo = lists:nth(2,lists:nth(1, Concept)),
+	TaxoIndexRes = get_TaxoIndexDB(User, Id),
+	if
+		TaxoIndexRes == [] ->
+			[lists:nth(1, Taxo), lists:nth(2, Taxo),[]];
+		true ->
+			{_,_,Res} = lists:nth(1,TaxoIndexRes),
+			[lists:nth(1, Taxo), lists:nth(2, Taxo), formatForJson(Res)]
 	end.
 
 
@@ -555,26 +590,23 @@ findCommonLength(L1, L2, CommonLength) ->
 getParentsFor([{_,Taxo,_}|T]) -> [getParents(Taxo)] ++ getParentsFor(T);
 getParentsFor([]) -> [].
 
-getParents(Taxo) -> 
-	taxo ! {self(),searchTaxo2,Taxo},
-	receive
-    	{taxo, {_,{starsi,ListStarsi}, _}} ->
-			 [H|_] = ListStarsi,
-			if 
-				H == [] -> 
-					[Taxo];
-				true ->
-					[Parent|_] = H,
-					[Taxo] ++ getParents(Parent)
-			end
-   	end.
+getParents(Taxo) ->
+	{_,{starsi,ListStarsi}, _} = getConcept(Taxo),
+	[H|_] = ListStarsi,
+	if 
+		H == [] -> 
+			[Taxo];
+		true ->
+			[Parent|_] = H,
+			[Taxo] ++ getParents(Parent)
+	end.
 	
-%%---------------unified search-------------------------------------
+%%---------------bookmark search-------------------------------------
 
-unifiedSearch(User,Query,"True") ->
+bookmarkSearch(User,Query,"True") ->
 	Res = processQuery(User,true,bracketCountCheck(Query,0,Query),[],[]) ++ bmNamesearch(User,Query),
 	jsonConvert(removeDuplicates(Res));
-unifiedSearch(User,Query,"False") ->
+bookmarkSearch(User,Query,"False") ->
 	Res = processQuery(User,false,bracketCountCheck(Query,0,Query),[],[]) ++ bmNamesearch(User,Query),
 	jsonConvert(removeDuplicates(Res)).
 
@@ -605,8 +637,8 @@ processQuery(User,Children,[],Buffer,[])      -> getBmsForWord(User,Buffer,Child
 getNotIncludedBms([H|T],Bms) -> getNotIncludedBms(T,lists:delete(H, Bms));
 getNotIncludedBms([],Bms) -> Bms. 
 
-getBmsForWord(User,Word,true) -> searchTaxoBmsWithChildren(User,removeEmptyChars(Word));
-getBmsForWord(User,Word,false) -> searchTaxoBmsWithoutChildren(User,removeEmptyChars(Word)).
+getBmsForWord(User,Word,true) -> searchTaxoBmsWithChildren(User,[removeEmptyChars(Word)]);
+getBmsForWord(User,Word,false) -> searchTaxoBmsWithoutChildren(User,[removeEmptyChars(Word)]).
 
 getBmsForId(User,Id,Children) -> 
 	IdList = string:tokens(Id,","),
@@ -632,22 +664,19 @@ removeEmptyChars2(Str) ->
 
 
 checkIfIdExists(Id) -> 
-	taxo ! {self(),searchTaxo2,Id},
-	receive
-    	{taxo, Msg} ->
-			if 
-				Msg == [] -> 
-					false;
-				true ->
-					true
-			end
-   	end.
+	Res = getConcept(Id),
+	if 
+		Res == [] -> 
+			false;
+		true ->
+			true
+	end.
 
 getBmsForId2(_,false,_,_) -> [];
 getBmsForId2(User,true,Id,true) -> getTaxoBmsWithChildrenForTaxoId(User,Id);
 getBmsForId2(User,true,Id,false) -> getTaxoBmsWithoutChildrenForTaxoId(User,Id).
 
-removeEmptyChars(Str) -> [joinListWithEmptySpaces(string:tokens(Str, " "))].
+removeEmptyChars(Str) -> joinListWithEmptySpaces(string:tokens(Str, " ")).
 
 joinListWithEmptySpaces([H|[]]) -> H; 
 joinListWithEmptySpaces([H|T]) -> H ++ " " ++  joinListWithEmptySpaces(T);
@@ -685,6 +714,134 @@ bracketToListHelper([41|T],Count) -> bracketToListHelper(T, Count - 1);
 bracketToListHelper([_|T],Count) -> bracketToListHelper(T, Count);
 bracketToListHelper(_,_) -> [].
 
+%----------------concept search-----------------------------
+
+conceptSearchAndSortForUser(User, Word, ContextConcepts) ->
+	Res = processConceptSearchQuery(Word),
+	SortedByNumberOfBmsAttached = sortByNumberOfBmsAttached(Res, nameToAtom(toString(User)++"index"),[]),
+	SortedByConceptsInContext = sortByConceptsInContext(SortedByNumberOfBmsAttached,string:tokens(ContextConcepts, ",")),
+	formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByConceptsInContext)).
+
+processConceptSearchQuery(Query) ->	processConceptQuery(replaceWordsWithConcepts(Query,[]),[]).
+
+replaceWordsWithConcepts([38|T], Buffer) -> [findConceptsForString(removeEmptyChars(Buffer))] ++ [38] ++ replaceWordsWithConcepts(T,[]);
+replaceWordsWithConcepts([124|T],Buffer) -> [findConceptsForString(removeEmptyChars(Buffer))] ++ [124] ++ replaceWordsWithConcepts(T,[]);
+replaceWordsWithConcepts([Text|T],Buffer) ->  replaceWordsWithConcepts(T,Buffer ++ [Text]);
+replaceWordsWithConcepts([],[]) -> [];
+replaceWordsWithConcepts([],Buffer) -> [findConceptsForString(removeEmptyChars(Buffer))].
+
+processConceptQuery([H|[38|[H2|T]]], []) -> processConceptQuery(T, removeDuplicates(getIntersection([H] ++ [H2])));
+processConceptQuery([H|[124|[H2|T]]], []) -> processConceptQuery(T, removeDuplicates(H ++ H2));
+processConceptQuery([38|[H|T]], Res) -> processConceptQuery(T, removeDuplicates(getIntersection([Res]++[H])));
+processConceptQuery([124|[H|T]], Res) -> processConceptQuery(T, removeDuplicates(Res ++ H));
+processConceptQuery([38|T], Res) -> processConceptQuery(T, Res);
+processConceptQuery([124|T], Res) -> processConceptQuery(T, Res);
+processConceptQuery([H|T], Res) -> processConceptQuery(T, removeDuplicates(Res ++ H));
+processConceptQuery(_, Res) -> removeDuplicates(Res).
+
+sortByPositionInHierarchyAndFormat([{_,H}|T]) -> 
+	getSortedRes(sortByPositionInHierarchy(H, [])) ++ sortByPositionInHierarchyAndFormat(T);
+sortByPositionInHierarchyAndFormat([]) -> [].
+
+sortByNumberOfBmsAttached([H|T],User,Res) ->
+	NumOfBms = getNumOfBmsAttached(get_TaxoIndexDB(User, lists:nth(1,H))),
+	sortByNumberOfBmsAttached(T,User,addToRes(NumOfBms,H,Res));
+sortByNumberOfBmsAttached([],_,Res) -> Res.
+
+addToRes(NumOfBms,Taxo,[{N,Taxos}|T]) -> 
+	if 
+		NumOfBms < N ->
+			[{N,Taxos}] ++ addToRes(NumOfBms,Taxo,T);
+		NumOfBms == N ->
+			[{N,Taxos ++ [Taxo]}] ++ T;
+		true -> 
+			[{NumOfBms,[Taxo]}] ++ [{N,Taxos}] ++ T
+	end;
+addToRes(NumOfBms,Taxo,[]) -> [{NumOfBms,[Taxo]}].
+
+getNumOfBmsAttached([{_,_,Bms}|_]) -> length(Bms);
+getNumOfBmsAttached(_) -> 0.
+	
+formatForJson([H|T]) -> [toBinaryString(H)] ++ formatForJson(T);
+formatForJson([]) -> [].
+
+formatForJsonFor([H|T]) -> [formatForJson(H)] ++ formatForJsonFor(T);
+formatForJsonFor([])-> [].
+
+sortByPositionInHierarchy([H|T], Res)-> 
+	[H1|_] = H,
+	Len = length(getParentsForTaxo(H1)),
+	sortByPositionInHierarchy(T, sortHelper(Res,{Len,H}));
+sortByPositionInHierarchy([],Res) -> Res.
+
+sortHelper([], Taxo) -> [Taxo];
+sortHelper([{Len1,Taxo1}|T], {Len2,Taxo2}) -> 
+	if 
+		Len2 < Len1 ->
+			[{Len2,Taxo2},{Len1,Taxo1}|T];
+		true -> 
+			[{Len1,Taxo1}] ++ sortHelper(T,{Len2,Taxo2})
+	end.
+
+getParentsForTaxo(Taxo) ->
+	case  getConcept(Taxo) of
+		{_,{starsi,ListStarsi}, _} ->
+			[H|_] = ListStarsi,
+			if 
+				H == [] -> 
+					[Taxo];
+				true ->
+					[Parent|_] = H,
+					[Taxo] ++ getParentsForTaxo(Parent)
+			end;
+		_ ->
+			[]
+	end.
+
+getSortedRes([{_,H}|T]) -> [H] ++ getSortedRes(T);
+getSortedRes([]) -> [].
+
+sortByConceptsInContext(Res, []) -> Res;
+sortByConceptsInContext([{_,H}|T], ContextConcepts) ->  makeNewGroupsSortedByContext(H,ContextConcepts) ++ sortByConceptsInContext(T, ContextConcepts);
+sortByConceptsInContext([],_) -> [].
+
+makeNewGroupsSortedByContext(H,ContextConcepts) -> 	makeNewGroupsSortedByContextHelper(sortByDistanceToConcepts(H,ContextConcepts),[]).
+
+makeNewGroupsSortedByContextHelper([],Res) -> Res;
+makeNewGroupsSortedByContextHelper([H|T],Res) -> makeNewGroupsSortedByContextHelper(T,addToRes2(H,Res)).
+
+
+addToRes2({X,H},[{N,Taxos}|T]) -> 
+	if 
+		X < N ->
+			[{N,Taxos}] ++ addToRes2({X,H},T);
+		X == N ->
+			[{N,Taxos ++ [H]}] ++ T;
+		true -> 
+			[{X,[H]}] ++ [{N,Taxos}] ++ T
+	end;
+addToRes2({X,H},[]) -> [{X,[H]}].
+
+sortByDistanceToConcepts([H|T], ContextConcepts) -> sortByDistanceToConcept(H, ContextConcepts,0) ++ sortByDistanceToConcepts(T,ContextConcepts);
+sortByDistanceToConcepts([], _) -> [].
+
+sortByDistanceToConcept(Con, [H|T], Res) -> sortByDistanceToConcept(Con, T, Res + getDistanceToConcept(Con,[H],3));
+sortByDistanceToConcept(Con,[],Res) -> [{Res,Con}].
+
+getDistanceToConcept(_,_,0) -> 0;
+getDistanceToConcept(Con,List,Limit) -> 
+	case lists:member(lists:nth(1,Con),List) of
+		false ->
+			getDistanceToConceptHelperFor(Con,List,Limit,[]);
+		true ->
+			Limit
+	end.
+
+getDistanceToConceptHelperFor(Con,[H|T],Limit,Res) ->
+	{_,{starsi,Starsi},{otroki,Otroki}} = getConcept(H),
+	getDistanceToConceptHelperFor(Con,T,Limit,Res ++ getIdsFromMsg(Starsi ++ Otroki));
+getDistanceToConceptHelperFor(Con,[],Limit,Res) -> getDistanceToConcept(Con,Res,Limit-1).
+
 %%---------------context-------------------------------------
 addContext(User, Context) ->
 	User2 = nameToAtom(toString(User)++"context"),
@@ -702,17 +859,11 @@ getContextsFor([]) -> [].
 formatForJsonTuples([{A,B}|T])-> [[toBinaryString(A),toBinaryString(B)]] ++ formatForJsonTuples(T);
 formatForJsonTuples([]) -> [].
 
-getTaxoForContext([Taxo|Tail]) -> 
-	taxo ! {self(),searchTaxo2,Taxo},
-	receive
-    	{taxo, Msg} ->
-			getTaxoForContext2(Msg) ++ getTaxoForContext(Tail)
-   	end;
+getTaxoForContext([Taxo|Tail]) -> getTaxoForContext2(getConcept(Taxo)) ++ getTaxoForContext(Tail);
 getTaxoForContext([]) -> [].
 
 getTaxoForContext2({Beseda,_,_}) -> [{lists:nth(1,Beseda),lists:nth(2,Beseda)}];
 getTaxoForContext2([]) -> [].
-
 
 removeContext(User, Name) -> 
 	User2 = nameToAtom(toString(User)++"context"),
@@ -723,7 +874,6 @@ removeContext(User, Name) ->
 		_ ->
 			remove_bookmarkDB(User2, Name), context_removed
 	end.
-
 %%----------------help functions-------------------------			
 nameToAtom(Name)->
 	case is_list(Name) of
@@ -977,7 +1127,6 @@ loopLogin() ->
 			loopLogin()
     end.
 
-%%------------------login/active users process functions-----------------------------
 loginS(Name, Pass, From) ->
 	Name2 = nameToAtom(Name),
 	case member2(Name2, Pass, login_HelpDB()) of
@@ -1113,256 +1262,50 @@ updateActiveUsers([]) -> ok.
 
 %%-------------------taxo process-----------------------	
 loopTaxo() ->
-	case get(dataIndex) of
+	case get(dataLoaded) of
         undefined  -> taxoLoad(),loopTaxo();
         _ -> 
 		receive
-			{Pid, searchTaxo, Word} ->
-				Pid ! {taxo, getBesedaWithChildrenAndParents(Word)},
-				loopTaxo();
-			{Pid, searchTaxo2, Word} ->
-				Pid ! {taxo, getBeseda2(Word)},
-				loopTaxo();
-			{Pid, searchTaxoOld, Word} ->
-				Pid ! {taxo, getBeseda(Word)},
-				loopTaxo();
-			{Pid, findTaxo, Word} ->
-				Pid ! {taxo, find(Word)},
-				loopTaxo();
-			{Pid, findTaxo2, Word, User, ContextConcepts} ->
-				Pid ! {taxo, find3(Word, User, ContextConcepts)},
-				loopTaxo();
-			{Pid, getChildren, Id} ->
-				Pid ! {taxo, getChildren(Id)},
-				loopTaxo();
-			M -> 
-				io:format("Message=~w~n",[M]),
+			_ -> 
 				loopTaxo()
     	end
     end.
 
 taxoLoad() -> 
-   io:format("Loading taxonomy ~n"),
-   Txt = readlines("data.txt"),
-   Ddata = dict:from_list(Txt),
-   put(dataIndex, Ddata),
-   Cdata = dict:from_list(makeChildrenList(Txt)),
-   put(childrenIndex, Cdata),
-   Txt2 = readlines2("searchIndex.txt"),
-   Dindex = dict:from_list(Txt2),
-   put(searchIndex, Dindex),
-   io:format("Taxo has been loaded ~n").
+	ets:new(dataindex, [set, named_table]),
+	ets:new(childrenindex, [set, named_table]),
+	ets:new(searchindex, [set, named_table]),
+	io:format("Loading taxonomy ~n"),
+	readDataIndex("data.txt"),
+	readSearchIndex("searchIndex.txt"),
+	io:format("Taxo has been loaded ~n"),
+	put(dataLoaded, 1).
 
 
-readlines(FileName) ->
+readDataIndex(FileName) ->
     {ok, Device} = file:open(FileName, [read]),
-    try get_all_lines(Device)
+    try getAllLinesForDataIndex(Device)
       after file:close(Device)
     end.
 
-get_all_lines(Device) ->
+getAllLinesForDataIndex(Device) ->
     case io:get_line(Device, "") of
         eof  -> [];
-        Line -> List = string:tokens(Line, ";\n"),[{lists:nth(1,List),List}] ++ get_all_lines(Device)
+        Line -> List = string:tokens(Line, ";\n"), Id = lists:nth(1,List), ets:insert(dataindex,{Id,List}), addToChildrenIndex([{Id,List}]), getAllLinesForDataIndex(Device)
     end.
 
-readlines2(FileName) ->
+readSearchIndex(FileName) ->
     {ok, Device} = file:open(FileName, [read]),
-    try get_all_lines2(Device)
+    try getAllLinesForSearchIndex(Device)
       after file:close(Device)
     end.
 
-get_all_lines2(Device) ->
+getAllLinesForSearchIndex(Device) ->
     case io:get_line(Device, "") of
         eof  -> [];
-        Line -> List = string:tokens(Line, ";\n"),[{string:to_lower(lists:nth(1,List)),lists:delete(lists:nth(1,List),List)}] ++ get_all_lines2(Device)
+        Line -> List = string:tokens(Line, ";\n"), ets:insert(searchindex,{string:to_lower(lists:nth(1,List)),lists:delete(lists:nth(1,List),List)}), getAllLinesForSearchIndex(Device)
     end.
 
-makeChildrenList([{Id,[_,_,_,_,Otroci]}|T]) -> [{Id,string:tokens(Otroci, ",")}] ++ makeChildrenList(T);
-makeChildrenList([{Id,[_,_,_,_]}|T]) -> [{Id,[]}] ++ makeChildrenList(T);
-makeChildrenList([]) -> [].
-
-searchTaxoS(String) when String =/= "null" -> dict:fetch(String,get(dataIndex));
-searchTaxoS(_) -> [].
-
-getBeseda(String) ->
-	case dict:find(String,get(dataIndex)) of
-        error  -> [];
-        {ok,Beseda} -> 
-		Otroki = getOtroke(Beseda),
-		Starsi = getEm(lists:nth(3,Beseda)),
-		[[<<"word">>,formatForJson(Beseda)],[<<"parents">>,formatForJsonFor(Starsi)],[<<"children">>,formatForJsonFor(Otroki)]]
-   	end.
-
-getBesedaWithChildrenAndParents(String) ->
-	case dict:find(String,get(dataIndex)) of
-        error  -> [];
-        {ok,Beseda} -> 
-		Otroki = getOtroke(Beseda),
-		Starsi = getEm(lists:nth(3,Beseda)),
-		[[[<<"word">>,formatForJson(Beseda)],[<<"parents">>,formatForJsonFor(Starsi)],[<<"children">>,formatForJsonFor(Otroki)]]]
-		++ getBesedaMultiple(Starsi) ++ getBesedaMultiple(Otroki)
-   	end.
-
-getBesedaMultiple([[]|T]) -> getBesedaMultiple(T);
-getBesedaMultiple([H|T]) -> [getBeseda(lists:nth(1,H))] ++ getBesedaMultiple(T);
-getBesedaMultiple([]) -> [].
-	
-getBeseda2(String) ->
-	case dict:find(String,get(dataIndex)) of
-        error  -> [];
-        {ok,Beseda} -> 
-		Otroki = getOtroke(Beseda),
-		Starsi = getEm(lists:nth(3,Beseda)),
-		{Beseda,{starsi,Starsi},{otroki,Otroki}}
-   	end.
-	
-getOtroke([_,_,_,_]) -> [];
-getOtroke([_,_,_,_,Otroci]) -> getEm(Otroci).
-
-getEm(Beseda) ->
-	List = (string:tokens(Beseda, ",")),
-	for(List).
-	
-for([X|Y]) -> [searchTaxoS(X)] ++ for(Y);
-for([]) -> [].
-
-find(String) ->
-	case dict:find(string:to_lower(String),get(searchIndex)) of
-        error  -> [];
-        {ok,List} -> for(List)
-   	end.
-
-find3(String, User, ContextConcepts) ->
-	Res = processConceptSearchQuery(String),
-	SortedByNumberOfBmsAttached = sortByNumberOfBmsAttached(Res, nameToAtom(toString(User)++"index"),[]),
-	SortedByConceptsInContext = sortByConceptsInContext(SortedByNumberOfBmsAttached,string:tokens(ContextConcepts, ",")),
-	formatForJsonFor(sortByPositionInHierarchyAndFormat(SortedByConceptsInContext)).
-
-processConceptSearchQuery(String) ->
-	Res = processQuery2(String,[]),
-	processQuery3(Res,[]).
-
-processQuery3([H|[38|[H2|T]]], []) -> processQuery3(T, removeDuplicates(getIntersection([H] ++ [H2])));
-processQuery3([H|[124|[H2|T]]], []) -> processQuery3(T, removeDuplicates(H ++ H2));
-processQuery3([38|[H|T]], Res) -> processQuery3(T, removeDuplicates(getIntersection([Res]++[H])));
-processQuery3([124|[H|T]], Res) -> processQuery3(T, removeDuplicates(Res ++ H));
-processQuery3([38|T], Res) -> processQuery3(T, Res);
-processQuery3([124|T], Res) -> processQuery3(T, Res);
-processQuery3([H|T], Res) -> processQuery3(T, removeDuplicates(Res ++ H));
-processQuery3([], Res) -> removeDuplicates(Res);
-processQuery3(_, Res) -> removeDuplicates(Res).
-
-processQuery2([38|T], Buffer) -> [find(removeEmptyChars3(Buffer))] ++ [38] ++ processQuery2(T,[]);
-processQuery2([124|T],Buffer) -> [find(removeEmptyChars3(Buffer))] ++ [124] ++ processQuery2(T,[]);
-processQuery2([Text|T],Buffer) ->  processQuery2(T,Buffer ++ [Text]);
-processQuery2([],[]) -> [];
-processQuery2([],Buffer) -> [find(removeEmptyChars3(Buffer))].
-
-removeEmptyChars3(Str) -> joinListWithEmptySpaces(string:tokens(Str, " ")).
-
-sortByPositionInHierarchyAndFormat([{_,H}|T]) -> 
-	getSortedRes(sortByPositionInHierarchy(H, [])) ++ sortByPositionInHierarchyAndFormat(T);
-sortByPositionInHierarchyAndFormat([]) -> [].
-
-sortByNumberOfBmsAttached([H|T],User,Res) ->
-	NumOfBms = getNumOfBmsAttached(get_TaxoIndexDB(User, lists:nth(1,H))),
-	sortByNumberOfBmsAttached(T,User,addToRes(NumOfBms,H,Res));
-sortByNumberOfBmsAttached([],_,Res) -> Res.
-
-addToRes(NumOfBms,Taxo,[{N,Taxos}|T]) -> 
-	if 
-		NumOfBms < N ->
-			[{N,Taxos}] ++ addToRes(NumOfBms,Taxo,T);
-		NumOfBms == N ->
-			[{N,Taxos ++ [Taxo]}] ++ T;
-		true -> 
-			[{NumOfBms,[Taxo]}] ++ [{N,Taxos}] ++ T
-	end;
-addToRes(NumOfBms,Taxo,[]) -> [{NumOfBms,[Taxo]}].
-
-getNumOfBmsAttached([{_,_,Bms}|_]) -> length(Bms);
-getNumOfBmsAttached(_) -> 0.
-
-getChildren(Id)-> dict:fetch(Id,get(childrenIndex)).
-	
-formatForJson([H|T]) -> [toBinaryString(H)] ++ formatForJson(T);
-formatForJson([]) -> [].
-
-formatForJsonFor([H|T]) -> [formatForJson(H)] ++ formatForJsonFor(T);
-formatForJsonFor([])-> [].
-
-sortByPositionInHierarchy([H|T], Res)-> 
-	[H1|_] = H,
-	Len = length(getParentsForTaxo(H1)),
-	sortByPositionInHierarchy(T, sortHelper(Res,{Len,H}));
-sortByPositionInHierarchy([],Res) -> Res.
-
-sortHelper([], Taxo) -> [Taxo];
-sortHelper([{Len1,Taxo1}|T], {Len2,Taxo2}) -> 
-	if 
-		Len2 < Len1 ->
-			[{Len2,Taxo2},{Len1,Taxo1}|T];
-		true -> 
-			[{Len1,Taxo1}] ++ sortHelper(T,{Len2,Taxo2})
-	end.
-
-getParentsForTaxo(Taxo) ->
-	case getBeseda2(Taxo) of
-		{_,{starsi,ListStarsi}, _} ->
-			[H|_] = ListStarsi,
-			if 
-				H == [] -> 
-					[Taxo];
-				true ->
-					[Parent|_] = H,
-					[Taxo] ++ getParentsForTaxo(Parent)
-			end;
-		_ ->
-			[]
-	end.
-
-getSortedRes([{_,H}|T]) -> [H] ++ getSortedRes(T);
-getSortedRes([]) -> [].
-
-sortByConceptsInContext(Res, []) -> Res;
-sortByConceptsInContext([{N,H}|T], ContextConcepts) ->  makeNewGroupsSortedByContext(H,ContextConcepts) ++ sortByConceptsInContext(T, ContextConcepts);
-sortByConceptsInContext([],_) -> [].
-
-%%[{N,sortByDistanceToConcepts(H,ContextConcepts)}]
-makeNewGroupsSortedByContext(H,ContextConcepts) -> 	makeNewGroupsSortedByContextHelper(sortByDistanceToConcepts(H,ContextConcepts),[]).
-
-makeNewGroupsSortedByContextHelper([],Res) -> Res;
-makeNewGroupsSortedByContextHelper([H|T],Res) -> makeNewGroupsSortedByContextHelper(T,addToRes2(H,Res)).
-
-
-addToRes2({X,H},[{N,Taxos}|T]) -> 
-	if 
-		X < N ->
-			[{N,Taxos}] ++ addToRes2({X,H},T);
-		X == N ->
-			[{N,Taxos ++ [H]}] ++ T;
-		true -> 
-			[{X,[H]}] ++ [{N,Taxos}] ++ T
-	end;
-addToRes2({X,H},[]) -> [{X,[H]}].
-
-sortByDistanceToConcepts([H|T], ContextConcepts) -> sortByDistanceToConcept(H, ContextConcepts,0) ++ sortByDistanceToConcepts(T,ContextConcepts);
-sortByDistanceToConcepts([], ContextConcepts) -> [].
-
-sortByDistanceToConcept(Con, [H|T], Res) -> sortByDistanceToConcept(Con, T, Res + getDistanceToConcept(Con,[H],3));
-sortByDistanceToConcept(Con,[],Res) -> [{Res,Con}].
-
-getDistanceToConcept(_,_,0) -> 0;
-getDistanceToConcept(Con,List,Limit) -> 
-	case lists:member(lists:nth(1,Con),List) of
-		false ->
-			getDistanceToConceptHelperFor(Con,List,Limit,[]);
-		true ->
-			Limit
-	end.
-
-getDistanceToConceptHelperFor(Con,[H|T],Limit,Res) -> 
-	{_,{starsi,Starsi},{otroki,Otroki}} = getBeseda2(H),
-	getDistanceToConceptHelperFor(Con,T,Limit,Res ++ getIdsFromMsg(Starsi ++ Otroki));
-getDistanceToConceptHelperFor(Con,[],Limit,Res) -> getDistanceToConcept(Con,Res,Limit-1).
+addToChildrenIndex([{Id,[_,_,_,_,Otroci]}|T]) -> ets:insert(childrenindex,{Id,string:tokens(Otroci, ",")}), addToChildrenIndex(T);
+addToChildrenIndex([{Id,[_,_,_,_]}|T]) -> ets:insert(childrenindex,{Id,[]}), addToChildrenIndex(T);
+addToChildrenIndex([]) -> done.
