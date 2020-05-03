@@ -383,10 +383,10 @@ search_taxoBmsSHelper3c(Bm,Rest) ->
 
 search_taxoBmsSHelper3d(Bm,[H|T]) -> 
 	case lists:member(Bm,H) of
-				false ->
-					false;
-				true ->
-					search_taxoBmsSHelper3d(Bm,T)
+		false ->
+			false;
+		true ->
+			search_taxoBmsSHelper3d(Bm,T)
 	end;
 search_taxoBmsSHelper3d(_,[]) -> true.
 
@@ -394,26 +394,78 @@ getSimilarBms(User,Bookmark) ->
 	User2 = nameToAtom(toString(User)),
 	UserIndex = nameToAtom(toString(User)++"index"),
 	[{_,_,_,T}] = get_bookmarkDB(User2, Bookmark),
-	Res = removeDuplicates(getSimilarBmsForConcepts(getTaxoIds(T),UserIndex,0)),
+	Res = formatSimBms(similarBmsForConcepts(getSimilarBmsForConcepts(getTaxoIds(T),UserIndex,3), [])),
 	jsonConvert(removeThisBm(Res,Bookmark)).
+
+formatSimBms([{_,X}|T]) -> [X] ++ formatSimBms(T);
+formatSimBms([]) -> [].
+
+similarBmsForConcepts([H|T],Res) ->  similarBmsForConcepts(T,similarBmsForConceptsHelp(H,Res));
+similarBmsForConcepts([],Res) -> sortSimBmRes(Res,[]).
+
+sortSimBmRes([H|T],Res) -> sortSimBmRes(T,simBmsAddToRes(H,Res));
+sortSimBmRes([],Res) -> Res.
+
+similarBmsForConceptsHelp([H|T],Res) -> 
+	case memberSim2(H,Res) of
+		false ->
+			similarBmsForConceptsHelp(T,simBmsAddToRes(H,Res));
+		true ->
+			similarBmsForConceptsHelp(T,similarBmsForConceptsHelp2(H,Res))
+	end;
+similarBmsForConceptsHelp([],Res) -> Res.
+
+memberSim2({_,X}, [{_,X}|_]) -> true;
+memberSim2(X, [_|T]) -> memberSim2(X,T);
+memberSim2(_,[]) -> false.
+
+similarBmsForConceptsHelp2({X,Bm},[{N,Bm}|T]) ->[{X + N,Bm}] ++ T;
+similarBmsForConceptsHelp2(F,[H|T]) -> [H] ++ similarBmsForConceptsHelp2(F,T).
+
+getSimilarBmsForConcepts([Taxo|T],UserIndex,Limit) -> [getSimilarBmsForConcept(UserIndex,Taxo,Limit,[])] ++ getSimilarBmsForConcepts(T,UserIndex,Limit);
+getSimilarBmsForConcepts([],_,_) -> [].
+
+getSimilarBmsForConcepts2(_,_,Res,0) -> Res;
+getSimilarBmsForConcepts2([Taxo|T],UserIndex,Res,Limit) -> getSimilarBmsForConcepts2(T,UserIndex,getSimilarBmsForConcept(UserIndex,Taxo,Limit,Res),Limit);
+getSimilarBmsForConcepts2([],_,Res,_) -> Res.
+
+getSimilarBmsForConcept(Index,TaxoId,Limit,ToReturn) -> 
+	List = get_TaxoIndexDB(Index, TaxoId),
+	Res = addToListIfNotAlready(getBookmarksFromTaxoTag(List),ToReturn),
+	{_,{starsi,Starsi},{otroki,Otroki}} = getConcept(TaxoId),
+	getSimilarBmsForConcepts2(getIdsFromMsg(Starsi ++ Otroki),Index,simBmsAddToResHelper(Res,ToReturn,Limit),Limit - 1).
+
+addToListIfNotAlready([H|T], Res) ->
+	case memberSim(H,Res) of
+		false ->
+			[H] ++ addToListIfNotAlready(T,Res);
+		true ->
+			addToListIfNotAlready(T,Res)
+	end;
+addToListIfNotAlready([],_) -> [].
+
+memberSim(X, [{_,X}|_]) -> true;
+memberSim(X, [_|T]) -> memberSim(X,T);
+memberSim(_,[]) -> false.
+
+simBmsAddToResHelper([H|T],ToReturn,Limit) -> simBmsAddToResHelper(T,simBmsAddToRes({Limit,H},ToReturn),Limit);
+simBmsAddToResHelper([],ToReturn,_) -> ToReturn.
+
+simBmsAddToRes({X,BmToAdd},[{N,BmInList}|T]) -> 
+	if 
+		X < N ->
+			[{N,BmInList}] ++ simBmsAddToRes({X,BmToAdd},T);
+		true -> 
+			[{X,BmToAdd}] ++ [{N,BmInList}] ++ T
+	end;
+simBmsAddToRes({X,BmToAdd},[]) -> [{X,BmToAdd}].
 
 removeThisBm([Bm|T],Bm) -> T;
 removeThisBm([OtherBm|T],Bm) -> [OtherBm] ++ removeThisBm(T,Bm);
 removeThisBm([],_) -> [].
 
-
 getTaxoIds([{Taxo,_}|T]) -> [Taxo] ++ getTaxoIds(T);
 getTaxoIds([]) -> [].
-
-getSimilarBmsForConcepts(_,_,3) -> [];
-getSimilarBmsForConcepts([Taxo|T],UserIndex,Limit) -> getSimilarBmsForConcept(UserIndex,Taxo,Limit) ++ getSimilarBmsForConcepts(T,UserIndex,Limit);
-getSimilarBmsForConcepts([],_,_) -> [].
-
-getSimilarBmsForConcept(Index,TaxoId,Limit) -> 
-	List = get_TaxoIndexDB(Index, TaxoId),
-	Res = getBookmarksFromTaxoTag(List),
-	{_,{starsi,Starsi},{otroki,Otroki}} = getConcept(TaxoId),
-	Res ++ getSimilarBmsForConcepts(getIdsFromMsg(Starsi ++ Otroki),Index,Limit + 1).
 
 getConceptJsonFormated(String) ->
 	case ets:lookup(dataindex, String) of
@@ -430,13 +482,13 @@ getConceptWithChildrenAndParents(String) ->
 			Children = getChildren(Concept),
 			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
 			[[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]]]
-			++ getBesedaMultiple(Parents) ++ getBesedaMultiple(Children);
+			++ getConceptJsonFormatedFor(Parents) ++ getConceptJsonFormatedFor(Children);
 		_ -> []
    	end.
 
-getBesedaMultiple([[]|T]) -> getBesedaMultiple(T);
-getBesedaMultiple([H|T]) -> [getConceptJsonFormated(lists:nth(1,H))] ++ getBesedaMultiple(T);
-getBesedaMultiple([]) -> [].
+getConceptJsonFormatedFor([[]|T]) -> getConceptJsonFormatedFor(T);
+getConceptJsonFormatedFor([H|T]) -> [getConceptJsonFormated(lists:nth(1,H))] ++ getConceptJsonFormatedFor(T);
+getConceptJsonFormatedFor([]) -> [].
 	
 getChildren([_,_,_,_]) -> [];
 getChildren([_,_,_,_,Otroci]) -> getConceptsByIdsString(Otroci).
@@ -464,7 +516,7 @@ getConcept(Id) ->
 		_ -> []
    	end.
 
-%%---------------tree visualization-------------------------------------
+%%---------------tree-------------------------------------
 
 getBookmarkTree(User) ->
 	User2 = nameToAtom(toString(User)++"index"),
@@ -591,8 +643,8 @@ getParentsFor([{_,Taxo,_}|T]) -> [getParents(Taxo)] ++ getParentsFor(T);
 getParentsFor([]) -> [].
 
 getParents(Taxo) ->
-	{_,{starsi,ListStarsi}, _} = getConcept(Taxo),
-	[H|_] = ListStarsi,
+	{_,{starsi,ListParents}, _} = getConcept(Taxo),
+	[H|_] = ListParents,
 	if 
 		H == [] -> 
 			[Taxo];
@@ -808,24 +860,24 @@ sortByConceptsInContext([],_) -> [].
 makeNewGroupsSortedByContext(H,ContextConcepts) -> 	makeNewGroupsSortedByContextHelper(sortByDistanceToConcepts(H,ContextConcepts),[]).
 
 makeNewGroupsSortedByContextHelper([],Res) -> Res;
-makeNewGroupsSortedByContextHelper([H|T],Res) -> makeNewGroupsSortedByContextHelper(T,addToRes2(H,Res)).
+makeNewGroupsSortedByContextHelper([H|T],Res) -> makeNewGroupsSortedByContextHelper(T,sortByGroup(H,Res)).
 
 
-addToRes2({X,H},[{N,Taxos}|T]) -> 
+sortByGroup({X,H},[{N,Taxos}|T]) -> 
 	if 
 		X < N ->
-			[{N,Taxos}] ++ addToRes2({X,H},T);
+			[{N,Taxos}] ++ sortByGroup({X,H},T);
 		X == N ->
 			[{N,Taxos ++ [H]}] ++ T;
 		true -> 
 			[{X,[H]}] ++ [{N,Taxos}] ++ T
 	end;
-addToRes2({X,H},[]) -> [{X,[H]}].
+sortByGroup({X,H},[]) -> [{X,[H]}].
 
 sortByDistanceToConcepts([H|T], ContextConcepts) -> sortByDistanceToConcept(H, ContextConcepts,0) ++ sortByDistanceToConcepts(T,ContextConcepts);
 sortByDistanceToConcepts([], _) -> [].
 
-sortByDistanceToConcept(Con, [H|T], Res) -> sortByDistanceToConcept(Con, T, Res + getDistanceToConcept(Con,[H],3));
+sortByDistanceToConcept(Con, [H|T], Res) -> sortByDistanceToConcept(Con, T, Res + getDistanceToConcept(Con,[H],2));
 sortByDistanceToConcept(Con,[],Res) -> [{Res,Con}].
 
 getDistanceToConcept(_,_,0) -> 0;
