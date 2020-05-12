@@ -1,15 +1,17 @@
 -module(bs).
 -export([rpc/1,start/0,regUser/3,login/3,logout/3,searchTaxo/4,findTaxo/5,addTaxoBm/8,addTaxoTag/5,removeBookmark/4,getUserBookmarks/3,
 		addContext/4, getContexts/3, removeContext/4, bmSearch/5, getTagsFromTaxoIndex/1,getIntersection/1,getBookmarkFile/4,addTaxoBmDataChunk/5,
-		getBookmarkTree/3,getTable/1, getBookmarkTree/1,getFilePreview/4,getSimilarBms/4]).
+		getBookmarkTree/3,getTable/1, getBookmarkTree/1,getFilePreview/4,getSimilarBms/4,addConcept/6,removeConcept/4]).
 -include_lib("stdlib/include/qlc.hrl").
 
 -record(users, {name, pass}).
+-record(userswithconceptcounter, {name, pass, conceptcount}).
 -record(testtable, {ime, vred}).
 -record(usertaxobookmarks, {name,url,taxotags}).
 -record(userbookmarkfiles, {name,filename,filedata}).
 -record(taxoindex, {taxotag, bookmarks}).
--record(contexttable, {context, taxotags, queries}). %% taxotags: {id,name}
+-record(contexttable, {context, taxotags, queries}).
+-record(userconcepttable, {id, name, desc, parent}).
 
 %%-----------interface----------------------
 start() -> spawn(fun()-> restarter() end),ok.
@@ -68,6 +70,12 @@ getBookmarkTree(User,Pass,Node) ->
 getSimilarBms(User,Pass,Node,Bookmark) -> 
 	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{getSimilarBms,toString(User),Bookmark}}]).
 
+addConcept(User,Pass,Node,ConceptName,ConceptDesc,Parent) -> 
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{addConcept,toString(User),ConceptName,ConceptDesc,Parent}}]).
+
+removeConcept(User,Pass,Node,Id) -> 
+	rpc:call(nameToAtom(Node),bs,rpc,[{userProc,toString(User),toString(Pass),{removeConcept,toString(User),Id}}]).
+
 %%------------rpc------------------------
 rpc(Q) ->
     bms ! {self(), Q},
@@ -79,59 +87,70 @@ rpc(Q) ->
     end.
 	
 %%-------------------user process loop-------------
-loopProc() ->
-    receive
-		{Id, {addTaxoBm, User, Name, Url,FileName,FileData,FilePreview}} ->
-			bms ! {forward, Id, addBookmark(User, Name, Url, FileName, FileData,FilePreview)},
-			loopProc();
-		{Id, {addTaxoBmDataChunk, User, Name,FileData}} ->
-			bms ! {forward, Id, addTaxoBmDataChunk(User, Name, FileData)},
-			loopProc();
-		{Id, {addTaxoTag, User, Name, Taxotags}} ->
-			bms ! {forward, Id, addTaxoTagS(User, Name, Taxotags)},
-			loopProc();
-		{Id, {removeBookmark, User, Name}} ->
-			bms ! {forward, Id, removeBookmark(User, Name)},
-			loopProc();
-		{Id, {getUserBookmarks,User}} ->
-			bms ! {forward, Id, getUserBookmarks(User)},
-			loopProc();
-		{Id, {searchTaxo, Word}} ->
-			bms ! {forward, Id, getConceptWithChildrenAndParents(Word)},
-			loopProc();
-		{Id, {findTaxo, User, Word, ContextConcepts}} ->
-			bms ! {forward, Id, conceptSearchAndSortForUser(User, Word, ContextConcepts)},
-			loopProc();
-		{Id, {addContext, User, Context}} ->
-			bms ! {forward, Id, addContext(User, Context)},
-			loopProc();
-		{Id, {getContexts, User}} ->
-			bms ! {forward, Id, getContexts(User)},
-			loopProc();
-		{Id, {removeContext, User, Context}} ->
-			bms ! {forward, Id, removeContext(User, Context)},
-			loopProc();
-		{Id, {bmSearch,User,Words,Children}} ->
-			bms ! {forward, Id, bookmarkSearch(User,Words,Children)},
-			loopProc();
-		{Id, {getBookmarkFile,User,Bookmark}} ->
-			bms ! {forward, Id, getBookmarkFile(User,Bookmark)},
-			loopProc();
-		{Id, {getFilePreview,User,Bookmark}} ->
-			bms ! {forward, Id, getFilePreview(User,Bookmark)},
-			loopProc();
-		{Id, {getBookmarkTree,User}} ->
-			bms ! {forward, Id, getBookmarkTree(User)},
-			loopProc();
-		{Id, {getSimilarBms,User,Bookmark}} ->
-			bms ! {forward, Id, getSimilarBms(User,Bookmark)},
-			loopProc(); 
-		{end_proc} ->
-			exit(normal);
-		M -> 
-			io:format("Message=~w~n",[M]),
-			loopProc()
+loopProc(ProcessUser) ->
+	case get(userConcepts) of
+        undefined  -> loadUserConcepts(nameToAtom(toString(ProcessUser)++"concepts")),loopProc(ProcessUser);
+        _ -> 
+			receive
+				{Id, {addTaxoBm, User, Name, Url,FileName,FileData,FilePreview}} ->
+					bms ! {forward, Id, addBookmark(User, Name, Url, FileName, FileData,FilePreview)},
+					loopProc(ProcessUser);
+				{Id, {addTaxoBmDataChunk, User, Name,FileData}} ->
+					bms ! {forward, Id, addTaxoBmDataChunk(User, Name, FileData)},
+					loopProc(ProcessUser);
+				{Id, {addTaxoTag, User, Name, Taxotags}} ->
+					bms ! {forward, Id, addTaxoTagS(User, Name, Taxotags)},
+					loopProc(ProcessUser);
+				{Id, {removeBookmark, User, Name}} ->
+					bms ! {forward, Id, removeBookmark(User, Name)},
+					loopProc(ProcessUser);
+				{Id, {getUserBookmarks,User}} ->
+					bms ! {forward, Id, getUserBookmarks(User)},
+					loopProc(ProcessUser);
+				{Id, {searchTaxo, Word}} ->
+					bms ! {forward, Id, getConceptWithChildrenAndParents(Word)},
+					loopProc(ProcessUser);
+				{Id, {findTaxo, User, Word, ContextConcepts}} ->
+					bms ! {forward, Id, conceptSearchAndSortForUser(User, Word, ContextConcepts)},
+					loopProc(ProcessUser);
+				{Id, {addContext, User, Context}} ->
+					bms ! {forward, Id, addContext(User, Context)},
+					loopProc(ProcessUser);
+				{Id, {getContexts, User}} ->
+					bms ! {forward, Id, getContexts(User)},
+					loopProc(ProcessUser);
+				{Id, {removeContext, User, Context}} ->
+					bms ! {forward, Id, removeContext(User, Context)},
+					loopProc(ProcessUser);
+				{Id, {bmSearch,User,Words,Children}} ->
+					bms ! {forward, Id, bookmarkSearch(User,Words,Children)},
+					loopProc(ProcessUser);
+				{Id, {getBookmarkFile,User,Bookmark}} ->
+					bms ! {forward, Id, getBookmarkFile(User,Bookmark)},
+					loopProc(ProcessUser);
+				{Id, {getFilePreview,User,Bookmark}} ->
+					bms ! {forward, Id, getFilePreview(User,Bookmark)},
+					loopProc(ProcessUser);
+				{Id, {getBookmarkTree,User}} ->
+					bms ! {forward, Id, getBookmarkTree(User)},
+					loopProc(ProcessUser);
+				{Id, {getSimilarBms,User,Bookmark}} ->
+					bms ! {forward, Id, getSimilarBms(User,Bookmark)},
+					loopProc(ProcessUser);
+				{Id, {addConcept,User,ConceptName,ConceptDesc,Parent}} ->
+					bms ! {forward, Id, addConcept(User,ConceptName,ConceptDesc,Parent)},
+					loopProc(ProcessUser);
+				{Id, {removeConcept,User,TaxoId}} ->
+					bms ! {forward, Id, removeConceptWithCheck(User,TaxoId)},
+					loopProc(ProcessUser);
+				{end_proc} ->
+					exit(normal);
+				M -> 
+					io:format("MessageloopProc=~w~n",[M]),
+					loopProc(ProcessUser)
+			end
     end.
+    
 %%-----------------Taxo func--------------------------------------
 addBookmark(User,Name,Url,FileName,FileData,FilePreview) ->
 	User2 = nameToAtom(toString(User)),
@@ -209,8 +228,8 @@ removeBookmark(User, Name) ->
 		_ ->
 			[H|_] = Bm,
 			removeBmFromTaxoIndex(User2,H),
-			remove_bookmarkDB(User2, Name),
-			remove_bookmarkDB(User3, Name),
+			remove_recordDB(User2, Name),
+			remove_recordDB(User3, Name),
 			deleteFileFromDisk(User,Name),
 			deleteFilePreviewFromDisk(User,Name),	
 			bookmark_removed
@@ -230,7 +249,7 @@ removeBmFromTaxoIndexHelper(User, Id, Name) ->
 			NewBmList = lists:delete(Name,Bms),
 			case NewBmList of
 					[] ->
-						remove_bookmarkDB(User2,Id), ok;
+						remove_recordDB(User2,Id), ok;
 					_ ->
 						add_TaxoBookmarkDB2(User2, Id, NewBmList),ok
 			end
@@ -318,8 +337,8 @@ searchTaxoBmsWithChildren(User,Word) ->
 
 findConceptsForString(String) ->
 	case ets:lookup(searchindex, string:to_lower(String)) of
-        [{_,List}] -> getConceptsByIds(List);
-		_ -> []
+        [{_,List}] -> getConceptsByIds(List) ++ findUserConceptsForString(string:to_lower(String));
+		_ -> findUserConceptsForString(string:to_lower(String))
    	end.
 
 getTaxoBmsWithoutChildrenForTaxoId(_,[]) -> [];
@@ -341,8 +360,8 @@ getOtroke2For([]) -> [].
 
 getChildrenFromIndex(Id)-> 
 	case ets:lookup(childrenindex, Id) of
-        [{_,Res}] -> Res;
-		_ -> []
+        [{_,Res}] -> Res ++ getUserConceptsByParent(Id);
+		_ -> getUserConceptsByParent(Id)
    	end.
 
 getIdsFromMsg([[]|T2]) -> getIdsFromMsg(T2);
@@ -466,32 +485,9 @@ removeThisBm([],_) -> [].
 
 getTaxoIds([{Taxo,_}|T]) -> [Taxo] ++ getTaxoIds(T);
 getTaxoIds([]) -> [].
-
-getConceptJsonFormated(String) ->
-	case ets:lookup(dataindex, String) of
-        [{_,Concept}] -> 
-			Children = getChildren(Concept),
-			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
-			[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]];
-		_ -> []
-   	end.
-
-getConceptWithChildrenAndParents(String) ->
-	case ets:lookup(dataindex, String) of
-        [{_,Concept}] -> 
-			Children = getChildren(Concept),
-			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
-			[[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]]]
-			++ getConceptJsonFormatedFor(Parents) ++ getConceptJsonFormatedFor(Children);
-		_ -> []
-   	end.
-
-getConceptJsonFormatedFor([[]|T]) -> getConceptJsonFormatedFor(T);
-getConceptJsonFormatedFor([H|T]) -> [getConceptJsonFormated(lists:nth(1,H))] ++ getConceptJsonFormatedFor(T);
-getConceptJsonFormatedFor([]) -> [].
 	
-getChildren([_,_,_,_]) -> [];
-getChildren([_,_,_,_,Otroci]) -> getConceptsByIdsString(Otroci).
+getChildren([Id,_,_,_]) -> getConceptsByIds(getUserConceptsByParent(Id));
+getChildren([Id,_,_,_,Otroci]) -> getConceptsByIdsString(Otroci) ++ getConceptsByIds(getUserConceptsByParent(Id)).
 
 getConceptsByIdsString(Ids) ->
 	List = (string:tokens(Ids, ",")),
@@ -503,7 +499,7 @@ getConceptsByIds([]) -> [].
 getConceptById(String) when String =/= "null" -> 
 	case ets:lookup(dataindex, String) of
         [{_,Concept}] -> Concept;
-		_ -> []
+		_ -> getUserConceptById(String)
    	end;
 getConceptById(_) -> [].
 
@@ -513,11 +509,152 @@ getConcept(Id) ->
 			Children = getChildren(Concept),
 			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
 			{Concept,{starsi,Parents},{otroki,Children}};
-		_ -> []
+		_ -> getUserConcepts(Id)
    	end.
 
-%%---------------tree-------------------------------------
+getConceptJsonFormated(String) ->
+	case ets:lookup(dataindex, String) of
+        [{_,Concept}] -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]];
+		_ -> getUserConceptJson(String)
+   	end.
 
+getConceptWithChildrenAndParents(String) ->
+	case ets:lookup(dataindex, String) of
+        [{_,Concept}] -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			[[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]]]
+			++ getConceptJsonFormatedFor(Parents) ++ getConceptJsonFormatedFor(Children);
+		_ -> getUserConceptJson2(String)
+   	end.
+
+getConceptJsonFormatedFor([[]|T]) -> getConceptJsonFormatedFor(T);
+getConceptJsonFormatedFor([H|T]) -> [getConceptJsonFormated(lists:nth(1,H))] ++ getConceptJsonFormatedFor(T);
+getConceptJsonFormatedFor([]) -> [].
+
+%$--------------add concept-----------------------------------------
+addConcept(User,ConceptName,ConceptDesc,Parent) ->
+	User2 = nameToAtom(toString(User)++"concepts"),
+	{UserNameDb,PassDb,Count} = lists:nth(1, getUserDB(nameToAtom(User))),
+	writeDB({users,UserNameDb,PassDb,Count+1}),
+	Id = "userconcept" ++ integer_to_list(Count),
+	writeDB({User2,Id,ConceptName,ConceptDesc,Parent}),
+	loadUserConcepts(User2), ok.
+
+removeConceptWithCheck(User,Id) ->
+	case canDeleteConcept(User,[Id]) of
+		false ->
+			things_connected_to_this_concept;
+		true ->
+			removeConcept(User,Id)
+	end.
+
+canDeleteConcept(User,[H|T]) ->
+	TaxoIndexRes = get_TaxoIndexDB(nameToAtom(toString(User)++"index"), H),
+	if
+		TaxoIndexRes == [] ->
+			case dict:find(H,get(userConceptChildren)) of
+				error  -> canDeleteConcept(User,T);
+				{ok,Concepts} -> 
+					case canDeleteConcept(User,Concepts) of
+						false -> false;
+						_ -> canDeleteConcept(User,T)
+					end
+			end;
+		true ->
+			false
+	end;
+canDeleteConcept(_,[]) -> true.
+
+removeConcept(User,Id) ->
+	case dict:find(Id,get(userConcepts)) of
+        error  -> 
+			concept_cannot_be_deleted;
+        {ok,_} -> 
+			User2 = nameToAtom(toString(User)++"concepts"),
+			case dict:find(Id,get(userConceptChildren)) of
+				error  -> ok;
+				{ok,Concepts} -> removeConceptFor(User,Concepts)
+			end,
+			remove_recordDB(User2, Id), 
+			loadUserConcepts(User2),
+			concept_removed
+   	end.
+
+removeConceptFor(User,[H|T]) -> removeConcept(User,H), removeConceptFor(User,T);
+removeConceptFor(_,[]) -> ok.
+
+getUserConceptJson(String) ->
+	case dict:find(String,get(userConcepts)) of
+        error  -> [];
+        {ok,Concept} -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]]
+   	end.
+
+getUserConceptJson2(String) ->
+	case dict:find(String,get(userConcepts)) of
+        error  -> [];
+        {ok,Concept} -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			[[[<<"word">>,formatForJson(Concept)],[<<"parents">>,formatForJsonFor(Parents)],[<<"children">>,formatForJsonFor(Children)]]]
+   	end.
+
+getUserConcepts(String) ->
+	case dict:find(String,get(userConcepts)) of
+        error  -> [];
+        {ok,Concept} -> 
+			Children = getChildren(Concept),
+			Parents = getConceptsByIdsString(lists:nth(3,Concept)),
+			{Concept,{starsi,Parents},{otroki,Children}}
+   	end.
+
+getUserConceptById(String) ->
+	case dict:find(String,get(userConcepts)) of
+        error  -> [];
+        {ok,Concept} -> Concept
+   	end.
+
+getUserConceptsByParent(String) ->
+	case dict:find(String,get(userConceptChildren)) of
+        error  -> [];
+        {ok,Concepts} -> Concepts
+   	end.
+
+findUserConceptsForString(String) ->
+	case dict:find(String,get(userSearchIndex)) of
+		error  -> [];
+		{ok,Concepts} ->  getConceptsByIds(Concepts)
+   	end.
+	
+loadUserConcepts(User) ->
+	UserConcepts = getTable(User),
+	Dict = dict:from_list(userConceptsFormatForDict(UserConcepts)),
+	put(userConcepts, Dict),
+	ParentsDict = dict:from_list(userConceptParentsFormatForDict(UserConcepts,[])),
+	put(userConceptChildren, ParentsDict),
+	SearchDict = dict:from_list(userConceptSearchIndexFormatForDict(UserConcepts,[])),
+	put(userSearchIndex, SearchDict).
+
+userConceptsFormatForDict([{_,Id,Name,Desc,Parent}|T]) -> [{Id,[Id,Name,Parent,Desc]}] ++ userConceptsFormatForDict(T);
+userConceptsFormatForDict([]) -> [].
+
+userConceptParentsFormatForDict([{_,Id,_,_,Parent}|T],Res) -> userConceptParentsFormatForDict(T,addUserConceptParentToRes(Id,Parent,Res));
+userConceptParentsFormatForDict([],Res) -> Res.
+
+addUserConceptParentToRes(Id,Parent,[{Parent,List}|T]) -> [{Parent,List ++ [Id]}|T];
+addUserConceptParentToRes(Id,Parent,[{ParentOther,List}|T]) ->  [{ParentOther,List}] ++ addUserConceptParentToRes(Id,Parent,T);
+addUserConceptParentToRes(Id,Parent,[]) -> [{Parent,[Id]}].
+
+userConceptSearchIndexFormatForDict([{_,Id,Name,_,_}|T],Res) -> userConceptSearchIndexFormatForDict(T,addUserConceptParentToRes(Id,string:to_lower(Name),Res));
+userConceptSearchIndexFormatForDict([],Res) -> Res.
+
+%%---------------tree-------------------------------------
 getBookmarkTree(User) ->
 	User2 = nameToAtom(toString(User)++"index"),
 	TaxoIndex = getTable(User2),
@@ -652,7 +789,6 @@ getParents(Taxo) ->
 			[Parent|_] = H,
 			[Taxo] ++ getParents(Parent)
 	end.
-	
 %%---------------bookmark search-------------------------------------
 
 bookmarkSearch(User,Query,"True") ->
@@ -924,7 +1060,7 @@ removeContext(User, Name) ->
 		[] -> 
 			context_removed;
 		_ ->
-			remove_bookmarkDB(User2, Name), context_removed
+			remove_recordDB(User2, Name), context_removed
 	end.
 %%----------------help functions-------------------------			
 nameToAtom(Name)->
@@ -964,8 +1100,34 @@ removeDuplicates([H|T]) -> [H | [X || X <- removeDuplicates(T), X /= H]].
 do_this_once() ->
     mnesia:create_schema([node()]),
     mnesia:start(),
-    mnesia:create_table(users,[{attributes, record_info(fields, users)},{disc_copies,[node()]}]),
+    mnesia:create_table(users,[{attributes, record_info(fields, userswithconceptcounter)},{disc_copies,[node()]}]),
 	mnesia:create_table(testtable,[{attributes, record_info(fields, testtable)},{disc_copies,[node()]}]).
+
+updateUsersTable() ->
+	case length(mnesia:table_info(users,attributes)) of
+		2 ->
+			Transformer =
+			fun(X)->
+				#userswithconceptcounter{name = X#users.name,
+					pass = X#users.pass,
+					conceptcount = 1}
+				end,
+			mnesia:transform_table(users, Transformer, record_info(fields, userswithconceptcounter), userswithconceptcounter);
+		_ ->
+			ok
+	end.
+
+checkForConceptsTable(TableName) ->
+	case table_exists(TableName) of
+		false ->
+				mnesia:create_table(TableName,[{attributes,record_info(fields,userconcepttable)},{disc_copies,[node()]}]);
+		true ->
+			ok
+	end.
+
+table_exists(TableName) ->
+   Tables = mnesia:system_info(tables),
+   lists:member(TableName,Tables).
 
 do(Q) ->
     F = fun() -> qlc:e(Q) end,
@@ -973,13 +1135,13 @@ do(Q) ->
     Val.
 	
 register_HelpDB() ->
-	do(qlc:q([{X#users.name} || X <- mnesia:table(users)])).
+	do(qlc:q([{X#userswithconceptcounter.name} || X <- mnesia:table(users)])).
 	
 login_HelpDB() ->
-	do(qlc:q([{X#users.name, X#users.pass} || X <- mnesia:table(users)])).
+	do(qlc:q([{X#userswithconceptcounter.name, X#userswithconceptcounter.pass} || X <- mnesia:table(users)])).
 
-add_userDB(Name,IndexName,ContextName,FileName,Pass) ->
-	Row = #users{name=Name, pass=Pass},
+add_userDB(Name,IndexName,ContextName,FileName,Pass,ConceptName) ->
+	Row = {users,Name, Pass, 1},
 	F = fun() ->
 	mnesia:write(Row)
 	end,
@@ -987,14 +1149,12 @@ add_userDB(Name,IndexName,ContextName,FileName,Pass) ->
 	mnesia:create_table(Name,[{attributes, record_info(fields, usertaxobookmarks)},{disc_copies,[node()]}]),
 	mnesia:create_table(IndexName,[{attributes, record_info(fields, taxoindex)},{disc_copies,[node()]}]),
 	mnesia:create_table(ContextName,[{attributes, record_info(fields, contexttable)},{disc_copies,[node()]}]),
-	mnesia:create_table(FileName,[{attributes, record_info(fields, userbookmarkfiles)},{disc_copies,[node()]}]).
+	mnesia:create_table(FileName,[{attributes, record_info(fields, userbookmarkfiles)},{disc_copies,[node()]}]),
+	mnesia:create_table(ConceptName,[{attributes,record_info(fields,userconcepttable)},{disc_copies,[node()]}]).
 
 	
 getTable(TableName) ->
 	do(qlc:q([X || X <- mnesia:table(TableName)])).
-	
-get_user_bookmarksDB2(User) ->
-	do(qlc:q([{X#usertaxobookmarks.name, X#usertaxobookmarks.url} || X <- mnesia:table(User)])).
 	
 get_user_bookmarksDB3(User) ->
 	do(qlc:q([{X#usertaxobookmarks.name, X#usertaxobookmarks.url, X#usertaxobookmarks.taxotags} || X <- mnesia:table(User)])).
@@ -1029,12 +1189,21 @@ add_TaxoBookmarkDB2(User, Taxotag, Bookmarks) ->
 	end,
 	mnesia:transaction(F).
 
-remove_bookmarkDB(User,Name) ->
+remove_recordDB(User,Name) ->
 	Oid = {User, Name},
 	F = fun() ->
 		mnesia:delete(Oid)
 	end,
 	mnesia:transaction(F).
+
+writeDB(X) ->
+	F = fun() ->
+		mnesia:write(X)
+	end,
+	mnesia:transaction(F).
+
+getUserDB(User) ->
+	do(qlc:q([{X#userswithconceptcounter.name, X#userswithconceptcounter.pass, X#userswithconceptcounter.conceptcount} || X <- mnesia:table(users), X#userswithconceptcounter.name == User])).
 
 %%------------main server process------------------------	
 loop() ->
@@ -1061,7 +1230,7 @@ loop() ->
 			Pid ! {bms, Q},
 			loop();
 		M -> 
-			io:format("Message=~w~n",[M]),
+			io:format("Messageloop=~w~n",[M]),
 			loop()
     end.
 	
@@ -1099,7 +1268,8 @@ setupDB() ->
 	mnesia:start(),
 	case mnesia:create_table(testtable,[{attributes, record_info(fields, testtable)},{disc_copies,[node()]}]) of
         {aborted,{already_exists, _}} ->
-			mnesia:wait_for_tables([users], 2000);		
+			mnesia:wait_for_tables([users], 2000),
+			updateUsersTable();
         {aborted, _} ->
 			mnesia:stop(), do_this_once(),mnesia:wait_for_tables([users], 2000)			
 	end.
@@ -1175,15 +1345,16 @@ loopLogin() ->
 			updateActiveUsers(Users),
 			loopLogin();
 		M -> 
-			io:format("Message=~w~n",[M]),
+			io:format("MessageloopLogin=~w~n",[M]),
 			loopLogin()
     end.
 
 loginS(Name, Pass, From) ->
 	Name2 = nameToAtom(Name),
+	NameConcept = nameToAtom(toString(Name)++"concepts"),
 	case member2(Name2, Pass, login_HelpDB()) of
 		true -> 
-			check_if_already_logged_in(Name2), spawn(fun()-> restarterForUserProc(Name2,From) end),success;
+			check_if_already_logged_in(Name2), checkForConceptsTable(NameConcept), spawn(fun()-> restarterForUserProc(Name2,From) end),success;
 		false ->
 			login_failed
 	end.
@@ -1203,7 +1374,7 @@ check_status_and_login(Name,Pass,From) ->
 		true -> 
 			case get(Name) of
 				undefined -> 
-					Pid = spawn(fun()-> loopProc() end),
+					Pid = spawn(fun()-> loopProc(Name) end),
 					loginproc ! {regproc, Name, Pid, From},
 					spawn(fun()-> restarterForUserProc(Name,From,Pid) end),
 					true;
@@ -1220,7 +1391,7 @@ registerProc(User,Pid,From) ->
 
 restarterForUserProc(Name,From) ->
 	process_flag(trap_exit, true),
-	Pid = spawn_link(fun()-> loopProc() end),
+	Pid = spawn_link(fun()-> loopProc(Name) end),
 	loginproc ! {regproc, Name, Pid, From},
 	receive
 		{'EXIT', Pid, normal} -> % not a crash
@@ -1269,12 +1440,13 @@ registerS(Name, Pass) ->
 	IndexName = nameToAtom(toString(Name)++"index"),
 	ContextName = nameToAtom(toString(Name)++"context"),
 	FileName = nameToAtom(toString(Name)++"files"),
+	ConceptName = nameToAtom(toString(Name)++"concepts"),
 	filelib:ensure_dir("/files/"++ toString(Name) ++ "/"),
 	case member(Name2, register_HelpDB() ) of
 		true ->
 			error_this_user_already_exists;
 		false ->
-			add_userDB(Name2,IndexName,ContextName,FileName,Pass),put(userList, login_HelpDB()),success
+			add_userDB(Name2,IndexName,ContextName,FileName,Pass,ConceptName),put(userList, login_HelpDB()),success
 	end.
 	
 member(X, [{X}|_]) -> true;

@@ -92,6 +92,8 @@ handleRequestByType([H|T],D) ->
 								(F == <<"getFilePreview">>) -> ret(bs:getFilePreview(U,P,N,getVal(<<"bookmark">>,D)));
 								(F == <<"getBookmarkTree">>) ->	ret(bs:getBookmarkTree(U,P,N));
 								(F == <<"getSimilarBms">>) -> ret(bs:getSimilarBms(U,P,N,getVal(<<"bookmark">>,D)));
+								(F == <<"addConcept">>) -> ret(bs:addConcept(U,P,N,getVal(<<"name">>,D),getVal(<<"description">>,D),getVal(<<"parent">>,D)));
+								(F == <<"removeConcept">>) -> ret(bs:removeConcept(U,P,N,getVal(<<"id">>,D)));
 								true -> 
 									[{<<"error">>,<<"true">>},{<<"errorInfo">>,<<"badRequestType">>}]
 							end;
@@ -127,6 +129,8 @@ getRequestTypeParams(F) ->
 		(F == <<"getFilePreview">>) -> [<<"bookmark">>];
 		(F == <<"getBookmarkTree">>) -> [];
 		(F == <<"getSimilarBms">>) -> [<<"bookmark">>];
+		(F == <<"addConcept">>) -> [<<"name">>,<<"description">>,<<"parent">>];
+		(F == <<"removeConcept">>) -> [<<"id">>];
 		true -> []
 	end.
 
