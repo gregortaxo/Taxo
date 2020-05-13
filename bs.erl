@@ -651,8 +651,22 @@ addUserConceptParentToRes(Id,Parent,[{Parent,List}|T]) -> [{Parent,List ++ [Id]}
 addUserConceptParentToRes(Id,Parent,[{ParentOther,List}|T]) ->  [{ParentOther,List}] ++ addUserConceptParentToRes(Id,Parent,T);
 addUserConceptParentToRes(Id,Parent,[]) -> [{Parent,[Id]}].
 
-userConceptSearchIndexFormatForDict([{_,Id,Name,_,_}|T],Res) -> userConceptSearchIndexFormatForDict(T,addUserConceptParentToRes(Id,string:to_lower(Name),Res));
+addUserConceptParentToResFor([H|T],Id,Res) -> addUserConceptParentToResFor(T,Id,addUserConceptParentToRes(Id,string:to_lower(H),Res));
+addUserConceptParentToResFor([],_,Res) -> Res.
+
+userConceptSearchIndexFormatForDict([{_,Id,Name,_,_}|T],Res) -> userConceptSearchIndexFormatForDict(T,addUserConceptParentToResFor(splitNameForSearchIndex(Name),Id,Res));
 userConceptSearchIndexFormatForDict([],Res) -> Res.
+
+splitNameForSearchIndex(String) -> 
+	Words = string:tokens(removeEmptyChars(String), " "),
+	makeWordList(Words,[]).
+
+makeWordList([H|T],Res) -> makeWordList(T,makeWordListHelper([H|T],[],Res)); 
+makeWordList([],Res) -> Res.
+
+makeWordListHelper([H|T],[],Res) -> makeWordListHelper(T,H,Res ++ [H]);
+makeWordListHelper([H|T],X,Res) -> makeWordListHelper(T,X ++ " " ++ H, Res ++ [X ++ " " ++ H]);
+makeWordListHelper([],_,Res) -> Res.
 
 %%---------------tree-------------------------------------
 getBookmarkTree(User) ->
