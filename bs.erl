@@ -651,15 +651,19 @@ addUserConceptParentToRes(Id,Parent,[{Parent,List}|T]) -> [{Parent,List ++ [Id]}
 addUserConceptParentToRes(Id,Parent,[{ParentOther,List}|T]) ->  [{ParentOther,List}] ++ addUserConceptParentToRes(Id,Parent,T);
 addUserConceptParentToRes(Id,Parent,[]) -> [{Parent,[Id]}].
 
-addUserConceptParentToResFor([H|T],Id,Res) -> addUserConceptParentToResFor(T,Id,addUserConceptParentToRes(Id,string:to_lower(H),Res));
-addUserConceptParentToResFor([],_,Res) -> Res.
-
 userConceptSearchIndexFormatForDict([{_,Id,Name,_,_}|T],Res) -> userConceptSearchIndexFormatForDict(T,addUserConceptParentToResFor(splitNameForSearchIndex(Name),Id,Res));
 userConceptSearchIndexFormatForDict([],Res) -> Res.
 
+addUserConceptParentToResFor([H|T],Id,Res) -> addUserConceptParentToResFor(T,Id,addUserConceptParentToRes(Id,string:to_lower(H),Res));
+addUserConceptParentToResFor([],_,Res) -> Res.
+
 splitNameForSearchIndex(String) -> 
-	Words = string:tokens(removeEmptyChars(String), " "),
+	Words = string:tokens(removeEmptyChars(removeCommas(String)), " "),
 	makeWordList(Words,[]).
+
+removeCommas([44|T]) -> removeCommas(T);
+removeCommas([H|T]) -> [H] ++ removeCommas(T);
+removeCommas([]) -> [].
 
 makeWordList([H|T],Res) -> makeWordList(T,makeWordListHelper([H|T],[],Res)); 
 makeWordList([],Res) -> Res.
